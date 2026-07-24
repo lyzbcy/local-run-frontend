@@ -30,3 +30,6 @@ userData/
 
 # 临时
 /tmp/
+build/icon.iconset/
+build/*.icns
+!build/icon.icns

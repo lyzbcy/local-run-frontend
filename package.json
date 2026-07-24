@@ -6,7 +6,9 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac"
   },
   "author": "lyzbcy <lyzbcy@github.com>",
   "license": "MIT",
@@ -15,7 +17,34 @@
     "type": "git",
     "url": "https://github.com/lyzbcy/local-run-frontend.git"
   },
+  "build": {
+    "appId": "io.github.lyzbcy.local-run-frontend",
+    "productName": "本地运行前端项目",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "icon": "build/icon.icns"
+    }
+  },
   "devDependencies": {
-    "electron": "^43.2.0"
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
   }
 }
