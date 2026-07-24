@@ -63,26 +63,39 @@ async function startStatic(project, portRange, log) {
   };
 }
 
-// 启动框架项目的 dev server（子进程）
-async function startFramework(project, portRange, log) {
-  const port = await findFreePort(portRange[0], portRange[1], project.port);
-  const homeUrl = `http://127.0.0.1:${port}/`;
-
-  // 拆分命令：支持 "npm run dev" 这种带空格的
-  const cmd = project.startCommand || 'npm run dev';
-  const parts = cmd.split(/\s+/);
+// 把用户配置的启动命令 + 指定端口，拼成正确的参数数组。
+// 关键：npm/yarn/pnpm run xxx 必须用 "--" 分隔，否则 --port 会被 npm 当成它自己的参数吞掉。
+function buildFrameworkArgs(cmd, port) {
+  const parts = cmd.split(/\s+/).filter(Boolean);
   const bin = parts[0];
   const args = parts.slice(1);
-  // 注入端口：vite/next/nuxt 都认 --port
-  args.push('--port', String(port), '--strictPort');
+  const portArgs = ['--port', String(port), '--strictPort'];
+  // npm/yarn/pnpm run <script> 需要用 -- 转发参数给脚本
+  if ((bin === 'npm' || bin === 'yarn' || bin === 'pnpm' || bin === 'npx') && !args.includes('--')) {
+    return [...args, '--', ...portArgs];
+  }
+  return [...args, ...portArgs];
+}
 
-  // 用系统 shell 找到 npm（Electron 打包后 PATH 可能不全，兜底加常见路径）
+// 从 dev server 输出里抓真实端口（vite/next/nuxt 都会打印 Local: http://...:PORT）。
+// 返回端口号字符串，抓不到返回 null。
+function extractPortFromOutput(output) {
+  const m = output.match(/(?:Local|ready)[^\n]*?https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i);
+  return m ? m[1] : null;
+}
+
+// 启动框架项目的 dev server（子进程）
+async function startFramework(project, portRange, log) {
+  const preferPort = await findFreePort(portRange[0], portRange[1], project.port);
+  const cmd = project.startCommand || 'npm run dev';
+  const bin = cmd.split(/\s+/)[0];
+  const args = buildFrameworkArgs(cmd, preferPort);
+  log(`启动命令：${bin} ${args.join(' ')}`);
+
   const env = {
     ...process.env,
-    // 不让子进程以为是 Electron
     ELECTRON_RUN_AS_NODE: undefined
   };
-  // mac 上双击启动 Electron 时 PATH 很短，补一下
   if (process.platform === 'darwin') {
     env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH || ''}`;
   }
@@ -94,13 +107,30 @@ async function startFramework(project, portRange, log) {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  const stdoutChunks = [];
-  proc.stdout.on('data', d => { const s = d.toString(); stdoutChunks.push(s); log(`[dev] ${s.trimEnd()}`); });
-  proc.stderr.on('data', d => { const s = d.toString(); log(`[dev!] ${s.trimEnd()}`); });
+  // 边收集输出边尝试抓真实端口
+  let realPort = null;
+  let buffer = '';
+  const tryExtract = () => {
+    if (!realPort) {
+      const p = extractPortFromOutput(buffer);
+      if (p) { realPort = p; log(`检测到 dev server 端口：${realPort}`); }
+    }
+  };
+  proc.stdout.on('data', d => { const s = d.toString(); buffer += s; log(`[dev] ${s.trimEnd()}`); tryExtract(); });
+  proc.stderr.on('data', d => { const s = d.toString(); buffer += s; log(`[dev!] ${s.trimEnd()}`); tryExtract(); });
   proc.on('exit', code => log(`[dev] 进程退出 code=${code}`));
 
-  // 等 server 起来
-  await waitHealthy(homeUrl, { timeout: 90000, log });
+  // 等真实端口出现（dev server 会打印），最长 90s
+  const deadline = Date.now() + 90000;
+  while (!realPort && Date.now() < deadline && !proc.killed) {
+    await sleep(500);
+  }
+
+  // 端口确认：抓到用抓到的，否则退回期望端口（健康检查兜底）
+  const port = realPort ? parseInt(realPort, 10) : preferPort;
+  const homeUrl = `http://127.0.0.1:${port}/`;
+  log(`健康检查：${homeUrl}`);
+  await waitHealthy(homeUrl, { timeout: 60000, log });
 
   const baseUrl = `http://127.0.0.1:${port}`;
   return {
@@ -168,4 +198,4 @@ function stopAll() {
   for (const pid of [...instances.keys()]) stopProject(pid);
 }
 
-module.exports = { startProject, stopProject, getStatus, stopAll, isPortFree, findFreePort };
+module.exports = { startProject, stopProject, getStatus, stopAll, isPortFree, findFreePort, buildFrameworkArgs, extractPortFromOutput };
