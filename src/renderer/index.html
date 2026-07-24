@@ -30,6 +30,7 @@
           <button class="nav-item" data-view="recent"><img src="../assets/sticker/expect.png" class="nav-sticker" alt=""> <span>最近</span></button>
           <button class="nav-item" data-view="ports"><img src="../assets/sticker/watch.png" class="nav-sticker" alt=""> <span>网关端口</span></button>
           <button class="nav-item" data-view="agent"><img src="../assets/sticker/smart.png" class="nav-sticker" alt=""> <span>AI Agent</span></button>
+          <button class="nav-item" data-view="logs"><img src="../assets/sticker/work.png" class="nav-sticker" alt=""> <span>日志</span></button>
         </nav>
         <div class="sidebar-footer">
           <div class="hint">不写文件到你的项目</div>
@@ -91,6 +92,18 @@ POST /stop    {"id"}  关闭项目</pre>
               <pre id="agentPrompt" class="code-block small selectable"></pre>
               <button id="btnCopyPrompt" class="ghost-btn">复制 Prompt</button>
             </div>
+          </div>
+        </section>
+
+        <!-- 日志视图 -->
+        <section id="view-logs" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title"><img src="../assets/sticker/work.png" class="panel-sticker" alt=""> 运行日志</div>
+              <button id="btnLogsClear" class="ghost-btn">清空</button>
+            </div>
+            <div class="panel-desc">最近 50 条操作日志（只存内存，不写磁盘）。开发测试用。</div>
+            <div id="logsBox" class="logs-box"></div>
           </div>
         </section>
       </main>

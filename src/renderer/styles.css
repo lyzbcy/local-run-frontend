@@ -177,6 +177,18 @@ input, textarea, pre.selectable { user-select: text; -webkit-user-select: text; 
 
 /* AI agent */
 .agent-block { margin-bottom: 18px; }
+.logs-box {
+  background: #1d2129; border-radius: var(--radius-sm); padding: 12px; max-height: 480px; overflow: auto;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+}
+.logs-empty { color: #86909c; text-align: center; padding: 30px; }
+.log-row { display: flex; gap: 10px; padding: 4px 2px; border-bottom: 1px solid rgba(255,255,255,.05); align-items: baseline; }
+.log-time { color: #86909c; flex-shrink: 0; }
+.log-level { flex-shrink: 0; min-width: 38px; padding: 1px 6px; border-radius: 3px; font-size: 10px; text-align: center; color: #d7e3f4; background: rgba(255,255,255,.1); }
+.log-level.ok { background: rgba(0,180,42,.25); color: #7ce090; }
+.log-level.warn { background: rgba(255,125,0,.25); color: #ffb980; }
+.log-level.err { background: rgba(245,63,63,.25); color: #ff9c9c; }
+.log-msg { color: #d7e3f4; word-break: break-all; flex: 1; }
 .agent-label { font-size: 13px; font-weight: 500; margin-bottom: 8px; color: var(--text-2); }
 .code-block {
   background: #1d2129; color: #d7e3f4; padding: 14px 16px; border-radius: var(--radius-sm);
