@@ -44,37 +44,24 @@ async function waitHealthy(url, { timeout = 60000, interval = 1000, log }) {
   throw new Error(`健康检查超时：${url}`);
 }
 
-// 启动静态项目的内嵌预览 server。
-// 不再用 findFreePort 预探测（net.createServer 探测法不可靠，vite 子进程占的端口可能探不到），
-// 改成直接尝试 listen，EADDRINUSE 就顺延重试——以真实 bind 结果为准。
+// 启动静态项目的内嵌预览 server
 async function startStatic(project, portRange, log) {
-  let startPort = portRange[0];
-  if (project.port && project.port >= portRange[0] && project.port <= portRange[1]) startPort = project.port;
-  let lastErr = null;
-  for (let port = startPort; port <= portRange[1]; port++) {
-    try {
-      const { server, baseUrl } = await createPreviewServer({
-        root: project.path,
-        projectName: project.name,
-        port,
-        routeAliases: project.routeAliases || {},
-        onLog: log
-      });
-      const navUrl = `${baseUrl}/__nav__`;
-      const homeUrl = `${baseUrl}/`;
-      await waitHealthy(homeUrl, { timeout: 15000, log });
-      return { kind: 'static', server, proc: null, port, baseUrl, homeUrl, navUrl, startedAt: Date.now() };
-    } catch (e) {
-      lastErr = e;
-      // 端口被占 → 顺延；其他错误（如健康检查超时）也试下一个端口，但记录
-      if (e && (e.code === 'EADDRINUSE' || /EADDRINUSE/.test(e.message))) {
-        log(`端口 ${port} 被占用，顺延到 ${port + 1}`);
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw new Error(`端口区间 ${startPort}-${portRange[1]} 全部启动失败：${lastErr ? lastErr.message : '未知'}`);
+  const port = await findFreePort(portRange[0], portRange[1], project.port);
+  const { server, baseUrl } = await createPreviewServer({
+    root: project.path,
+    projectName: project.name,
+    port,
+    routeAliases: project.routeAliases || {},
+    onLog: log
+  });
+  const navUrl = `${baseUrl}/__nav__`;
+  const homeUrl = `${baseUrl}/`;
+  // 健康检查首页
+  await waitHealthy(homeUrl, { timeout: 15000, log });
+  return {
+    kind: 'static', server, proc: null, port, baseUrl,
+    homeUrl, navUrl, startedAt: Date.now()
+  };
 }
 
 // 把用户配置的启动命令 + 指定端口，拼成正确的参数数组。
