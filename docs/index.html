@@ -7,37 +7,40 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob: https:; connect-src 'self' https://api.github.com;">
 <title>本地运行前端项目 · 一键启动任意前端项目</title>
 <link rel="icon" href="./assets/sticker/work.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#f5f7fa;--card:#fff;--text:#1d2129;--text2:#4e5969;--text3:#86909c;
-  --primary:#409eff;--primary-d:#2b8ae8;--primary-bg:#e8f3ff;--radius:12px;
-  --shadow:0 4px 16px rgba(0,0,0,.08);--shadow-lg:0 12px 40px rgba(64,158,255,.18);
+  --bg:#FAF8FF;--bg-soft:#F5F0FA;--card:#fff;--text:#4C1D95;--text2:#6B7280;--text3:#9CA3AF;
+  --primary:#7C3AED;--primary-d:#6D28D9;--primary-bg:#F0EBFA;
+  --pink:#EC4899;--pink-bg:#FCE7F3;--border:#EDE7F5;--radius:14px;
+  --shadow:0 4px 16px rgba(124,58,237,.08);--shadow-lg:0 12px 32px rgba(124,58,237,.16);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+body{font-family:"ZCOOL KuaiLe",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
 .container{max-width:920px;margin:0 auto;padding:0 20px}
 
 /* Hero */
-.hero{background:linear-gradient(135deg,#409eff 0%,#36cfc9 100%);color:#fff;padding:70px 0 60px;text-align:center}
+.hero{background:linear-gradient(135deg,#7C3AED 0%,#EC4899 100%);color:#fff;padding:70px 0 60px;text-align:center}
 .hero .logo{width:140px;height:140px;margin:0 auto 12px;animation:float 3s ease-in-out infinite;
-  filter:drop-shadow(0 8px 20px rgba(0,0,0,.25))}
+  filter:drop-shadow(0 8px 20px rgba(124,58,237,.4))}
 .hero .logo img{width:100%;height:100%;object-fit:contain}
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
-.hero h1{font-size:38px;font-weight:700;margin-bottom:12px;letter-spacing:-.5px}
+.hero h1{font-size:42px;font-weight:400;margin-bottom:12px;letter-spacing:2px}
 .hero .tagline{font-size:17px;opacity:.95;margin-bottom:8px}
 .hero .subtag{font-size:14px;opacity:.85;margin-bottom:28px}
-.hero .version-badge{display:inline-block;background:rgba(255,255,255,.2);padding:4px 14px;border-radius:20px;font-size:13px;margin-bottom:24px;backdrop-filter:blur(6px)}
+.hero .version-badge{display:inline-block;background:rgba(255,255,255,.22);padding:5px 16px;border-radius:999px;font-size:13px;margin-bottom:24px;backdrop-filter:blur(6px)}
 .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:600;text-decoration:none;cursor:pointer;border:none;transition:all .2s}
-.btn-primary{background:#fff;color:var(--primary-d);box-shadow:0 6px 20px rgba(0,0,0,.15)}
-.btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.2)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:14px;font-size:16px;font-weight:600;text-decoration:none;cursor:pointer;border:none;transition:all .2s}
+.btn-primary{background:#fff;color:var(--primary-d);box-shadow:0 6px 20px rgba(124,58,237,.25)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(124,58,237,.35)}
 .btn-sticker{width:24px;height:24px;vertical-align:middle}
-.btn-ghost{background:rgba(255,255,255,.15);color:#fff;border:2px solid rgba(255,255,255,.5)}
-.btn-ghost:hover{background:rgba(255,255,255,.25)}
+.btn-ghost{background:rgba(255,255,255,.18);color:#fff;border:2px solid rgba(255,255,255,.45)}
+.btn-ghost:hover{background:rgba(255,255,255,.28)}
 
 /* Section */
 .section{padding:56px 0}
-.section h2{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}
+.section h2{font-size:28px;font-weight:400;text-align:center;margin-bottom:12px;letter-spacing:1px}
 .section .lead{text-align:center;color:var(--text3);font-size:15px;margin-bottom:40px}
 .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}
 .feature{background:var(--card);padding:32px 24px 28px;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s;text-align:center}
@@ -220,7 +223,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 // 原理：每次改网页要更新 VERSION 常量。用户访问时拿 localStorage 里上次的版本对比，
 // 不一致就强制刷新（清缓存 reload）。同时拉 GitHub release 最新版本显示在 hero。
 // 改网页时务必同步改这里的 VERSION。
-const VERSION = '0.2.0';   // 改网页时同步更新这里（触发用户端强制刷新）
+const VERSION = '0.2.1';   // 改网页时同步更新这里（触发用户端强制刷新）
 const REPO = 'lyzbcy/local-run-frontend';
 
 document.getElementById('pageVersion').textContent = '页面版本 v' + VERSION;
