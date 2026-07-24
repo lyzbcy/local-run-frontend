@@ -239,7 +239,33 @@ ipcMain.handle('logs:clear', async () => { logger.clear(); return { ok: true }; 
 
 // ---- lifecycle ----
 app.whenReady().then(async () => {
-  store.init(app.getPath('userData'));
+  // ⚠️ 关键：用固定的稳定 userData 路径，不依赖 app.getName()。
+  // app.getName() 在打包后 = productName（本地运行前端项目），开发时 = package name（local-run-frontend），
+  // 二者不一致会导致 userData 路径漂移，更新后用户的项目数据"消失"（其实读到了另一个空目录）。
+  // 固定成 local-run-frontend-data，永不变；并迁移旧路径的数据过来。
+  const STABLE_DATA_DIR = path.join(app.getPath('appData'), 'local-run-frontend-data');
+  const OLD_CANDIDATES = [
+    path.join(app.getPath('appData'), 'local-run-frontend'),          // 旧 package name 版本
+    path.join(app.getPath('appData'), '本地运行前端项目'),              // productName 版本
+    app.getPath('userData')                                          // Electron 默认（兜底）
+  ];
+  fs.mkdirSync(STABLE_DATA_DIR, { recursive: true });
+  // 迁移：若稳定目录没有 projects.json，从旧候选目录找一份搬过来
+  const stableFile = path.join(STABLE_DATA_DIR, 'projects.json');
+  if (!fs.existsSync(stableFile)) {
+    for (const old of OLD_CANDIDATES) {
+      const oldFile = path.join(old, 'projects.json');
+      if (fs.existsSync(oldFile)) {
+        try {
+          fs.copyFileSync(oldFile, stableFile);
+          logger.info(`迁移项目数据：${oldFile} → ${stableFile}`);
+          break;
+        } catch (e) { logger.warn(`迁移失败 ${oldFile}：${e.message}`); }
+      }
+    }
+  }
+  app.setPath('userData', STABLE_DATA_DIR); // 让 Electron 内部也用这个稳定路径
+  store.init(STABLE_DATA_DIR);
   createWindow();
 
   // 启动 AI 控制接口（失败不阻塞）

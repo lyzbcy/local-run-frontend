@@ -97,7 +97,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
     <h1>本地运行前端项目</h1>
     <div class="tagline">一键启动任意前端项目，<b>不往项目里写任何文件</b></div>
     <div class="subtag">替代每个项目都要重跑一次的预览脚本，团队共享、永远在线</div>
-    <div class="version-badge" id="heroVersion">v0.1.2</div>
+    <div class="version-badge" id="heroVersion">v0.2.0</div>
     <div class="cta-row">
       <a id="downloadBtn" class="btn btn-primary" href="https://github.com/lyzbcy/local-run-frontend/releases/latest">
         <img src="./assets/sticker/go.png" alt="" class="btn-sticker"> 下载 Mac 版
@@ -220,7 +220,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 // 原理：每次改网页要更新 VERSION 常量。用户访问时拿 localStorage 里上次的版本对比，
 // 不一致就强制刷新（清缓存 reload）。同时拉 GitHub release 最新版本显示在 hero。
 // 改网页时务必同步改这里的 VERSION。
-const VERSION = '0.1.2';   // 改网页时同步更新这里（触发用户端强制刷新）
+const VERSION = '0.2.0';   // 改网页时同步更新这里（触发用户端强制刷新）
 const REPO = 'lyzbcy/local-run-frontend';
 
 document.getElementById('pageVersion').textContent = '页面版本 v' + VERSION;
