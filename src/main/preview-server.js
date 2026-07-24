@@ -147,9 +147,47 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// 扫描项目所有 html 的 <base href>，收集 base 前缀集合。
+// 真实项目用 <base href="/mobile/"> 改写相对路径解析根，浏览器据此把 ../css/x 解析成 /mobile/css/x。
+// 服务器需知道这些 base 前缀，才能把 /mobile/css/x 正确映射回磁盘根的 /css/x。
+// 只收集「以 / 开头、以 / 结尾」的目录型 base（如 /mobile/、/home/page/），按长度降序排（最长前缀优先匹配）。
+function scanBaseHrefs(root) {
+  const baseSet = new Set();
+  const htmls = scanHtmlFiles(root, 3); // 扫深一点，3 层
+  for (const f of htmls) {
+    try {
+      const buf = fs.readFileSync(f.abs);
+      const head = buf.toString('utf8', 0, Math.min(buf.length, 4096));
+      const m = head.match(/<base[^>]*\shref=["']([^"']*)["']/i);
+      if (m && m[1]) {
+        let b = m[1];
+        // 规范化成 /xxx/ 形式（绝对路径、目录型）
+        if (b.startsWith('/') && !b.endsWith('/')) b = b + '/';
+        if (b.startsWith('/') && b.endsWith('/') && b !== '/') baseSet.add(b);
+      }
+    } catch {}
+  }
+  // 按长度降序，最长前缀优先匹配（/mobile/casePage/ 优先于 /mobile/）
+  return [...baseSet].sort((a, b) => b.length - a.length);
+}
+
 // routeAliases 形如 { '/m/case': '/casePage/caseIndex.html' }，来自 detector 或用户配置。
 function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog }) {
   const log = (...a) => { try { (onLog || console.log)(...a); } catch {} };
+
+  // 启动时扫一次 <base href>，建显式映射表（替代猜测式 prefix-strip）
+  const basePrefixes = scanBaseHrefs(root);
+  if (basePrefixes.length) log(`[base-href] 检测到 ${basePrefixes.length} 个 base 前缀：${basePrefixes.join(', ')}`);
+
+  // 用 base 前缀把 URL 映射回磁盘根。最长前缀精确匹配，匹配不上就原样返回（不做任何猜测）。
+  const mapByBaseHref = (urlPath) => {
+    for (const prefix of basePrefixes) {
+      if (urlPath.startsWith(prefix)) {
+        return '/' + urlPath.slice(prefix.length);
+      }
+    }
+    return urlPath;
+  };
 
   const server = http.createServer((req, res) => {
     let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
@@ -168,27 +206,15 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
     // 别名
     if (routeAliases[urlPath]) urlPath = routeAliases[urlPath];
 
+    // base-href 映射：若请求路径以已知 base 前缀开头，剥掉前缀映射回磁盘根。
+    // 这是对 <base href> 语义的正确实现（替代旧的猜测式 prefix-strip，后者会在边界返回错误文件还报200）。
+    if (basePrefixes.length) urlPath = mapByBaseHref(urlPath);
+
     let filePath = path.normalize(path.join(root, urlPath));
 
     // 防穿越
     if (!filePath.startsWith(root)) {
       res.writeHead(403); res.end('Forbidden'); return;
-    }
-
-    // 通用前缀剥离兜底：很多静态项目 HTML 用相对路径引用资源，
-    // 从子目录（如 /seo/、/mobile/、/m/）进入时，浏览器会把相对路径多解析出一层前缀，
-    // 但资源实际在项目根目录。这里逐级剥掉前缀目录重试，自动适配任何项目。
-    if (!fs.existsSync(filePath)) {
-      const parts = urlPath.split('/').filter(Boolean); // ['seo','image','svg','aizs.svg']
-      // 逐级剥前缀：试剥 1 级、2 级，命中即用
-      for (let strip = 1; strip <= 2 && strip < parts.length; strip++) {
-        const candidate = '/' + parts.slice(strip).join('/');
-        const candidatePath = path.normalize(path.join(root, candidate));
-        if (candidatePath.startsWith(root) && fs.existsSync(candidatePath)) {
-          filePath = candidatePath;
-          break;
-        }
-      }
     }
 
     // 解析真实文件路径。先 stat，根据结果决定回退策略。
