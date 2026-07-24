@@ -75,26 +75,45 @@ function extractTitle(absPath) {
   return null;
 }
 
-// 生成目录页 HTML。baseUrl 是 server 的根（http://host:port），htmlFiles 是 scanHtmlFiles 结果。
+// 生成目录页 HTML。按一级目录自动分类 + 搜索 + 推广区。
 function renderNavPage(projectName, baseUrl, htmlFiles) {
   const items = htmlFiles.map(f => {
     const title = extractTitle(f.abs) || path.basename(f.rel);
     const isIndex = /(^|\/)index\.html?$/i.test(f.rel);
-    return { rel: f.rel, title, isIndex };
-  });
-  // 首页排前面
-  items.sort((a, b) => {
-    if (a.isIndex !== b.isIndex) return a.isIndex ? -1 : 1;
-    return a.rel.localeCompare(b.rel);
+    // 一级目录名作为分类（根目录的算"首页"）
+    const seg = f.rel.split('/').filter(Boolean);
+    const category = seg.length <= 1 ? '首页' : seg[0];
+    return { rel: f.rel, title, isIndex, category };
   });
 
-  const cards = items.map(it => {
-    const href = baseUrl + it.rel;
-    const tag = it.isIndex ? '<span class="tag">首页</span>' : '';
-    return `<a class="card" href="${href}" target="_blank">
-      <div class="ct">${escapeHtml(it.title)}${tag}</div>
-      <div class="cu">${escapeHtml(it.rel)}</div>
-    </a>`;
+  // 按分类分组，保持顺序：首页优先，其余按名字
+  const catOrder = ['首页'];
+  const groups = new Map();
+  for (const it of items) {
+    if (!groups.has(it.category)) { groups.set(it.category, []); if (!catOrder.includes(it.category)) catOrder.push(it.category); }
+    groups.get(it.category).push(it);
+  }
+  // 每组内：首页优先，再按路径
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => (a.isIndex !== b.isIndex ? (a.isIndex ? -1 : 1) : a.rel.localeCompare(b.rel)));
+  }
+
+  const CAT_ICON = { '首页': '🏠', casePage: '📖', schemePage: '🛠️', page: '📄', common: '🧩' };
+  const sections = catOrder.filter(c => groups.get(c).length).map(cat => {
+    const list = groups.get(cat);
+    const icon = CAT_ICON[cat] || '📁';
+    const cards = list.map(it => {
+      const href = baseUrl + it.rel;
+      const tag = it.isIndex ? '<span class="tag">首页</span>' : '';
+      return `<a class="card" href="${href}" target="_blank" data-search="${escapeHtml((it.title + ' ' + it.rel).toLowerCase())}">
+        <div class="ct">${escapeHtml(it.title)}${tag}</div>
+        <div class="cu">${escapeHtml(it.rel)}</div>
+      </a>`;
+    }).join('');
+    return `<div class="section" data-cat="${escapeHtml(cat)}">
+      <div class="section-title">${icon} ${escapeHtml(cat)} <span class="count">${list.length}</span></div>
+      <div class="cards">${cards}</div>
+    </div>`;
   }).join('');
 
   return `<!DOCTYPE html>
@@ -107,36 +126,97 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
          background:#f5f7fa; color:#1d2129; }
-  .hd { padding:20px 28px; background:linear-gradient(135deg,#409eff,#36cfc9); color:#fff;
-        position:sticky; top:0; z-index:2; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .hd { padding:18px 28px; background:linear-gradient(135deg,#409eff,#36cfc9); color:#fff;
+        position:sticky; top:0; z-index:3; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .hd-top { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
   .hd h1 { margin:0; font-size:20px; font-weight:600; }
   .hd .sub { font-size:13px; opacity:.9; margin-top:6px; }
   .hd .sub a { color:#fff; text-decoration:underline; }
+  .search-box { background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3); border-radius:8px;
+    padding:8px 14px; color:#fff; font-size:14px; width:280px; max-width:100%; backdrop-filter:blur(4px); }
+  .search-box::placeholder { color:rgba(255,255,255,.7); }
+  .search-box:focus { outline:none; background:rgba(255,255,255,.28); }
   .wrap { max-width:1200px; margin:0 auto; padding:20px 28px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
-  .card { display:flex; flex-direction:column; gap:6px; padding:16px 18px; background:#fff;
+  .section { margin-bottom:24px; }
+  .section-title { font-size:15px; font-weight:600; color:#4e5969; margin-bottom:12px;
+    display:flex; align-items:center; gap:8px; }
+  .count { font-size:12px; background:#e8f3ff; color:#409eff; padding:1px 8px; border-radius:10px; font-weight:400; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+  .card { display:flex; flex-direction:column; gap:6px; padding:14px 16px; background:#fff;
           border:1px solid #e5e6eb; border-radius:10px; text-decoration:none; color:#1d2129;
           transition:all .18s; }
   .card:hover { transform:translateY(-2px); border-color:#409eff; box-shadow:0 6px 16px rgba(64,158,255,.18); }
-  .ct { font-size:15px; font-weight:500; display:flex; align-items:center; gap:8px; }
-  .cu { font-size:12px; color:#86909c; word-break:break-all; font-family:ui-monospace,Menlo,monospace; }
+  .ct { font-size:14px; font-weight:500; display:flex; align-items:center; gap:8px; }
+  .cu { font-size:11px; color:#86909c; word-break:break-all; font-family:ui-monospace,Menlo,monospace; }
   .tag { font-size:11px; background:#e8f3ff; color:#409eff; padding:2px 8px; border-radius:10px; font-weight:400; }
   .empty { text-align:center; padding:60px 20px; color:#86909c; }
-  .ft { text-align:center; padding:30px; color:#c9cdd4; font-size:12px; }
+  .no-match { display:none; text-align:center; padding:40px; color:#86909c; }
+  /* 推广区 */
+  .promo { margin-top:32px; padding:28px; background:#fff; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .promo h2 { margin:0 0 6px; font-size:16px; text-align:center; }
+  .promo .pdesc { text-align:center; color:#86909c; font-size:13px; margin-bottom:20px; }
+  .qr-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; max-width:520px; margin:0 auto; }
+  .qr-cell { text-align:center; }
+  .qr-cell img { width:120px; height:120px; object-fit:cover; border-radius:8px; border:1px solid #f0f1f3; }
+  .qr-cell .label { font-size:12px; color:#4e5969; margin-top:6px; }
+  .ft { text-align:center; padding:24px; color:#c9cdd4; font-size:12px; }
   .ft a { color:#409eff; text-decoration:none; }
 </style>
 </head>
 <body>
 <div class="hd">
-  <h1>${escapeHtml(projectName)} · 目录页</h1>
-  <div class="sub">共 ${items.length} 个页面 ｜ <a href="${baseUrl}/" target="_blank">打开首页 ${baseUrl}/</a></div>
+  <div class="hd-top">
+    <div>
+      <h1>${escapeHtml(projectName)} · 目录页</h1>
+      <div class="sub">共 ${items.length} 个页面，按栏目分类 ｜ <a href="${baseUrl}/" target="_blank">打开首页 ${baseUrl}/</a></div>
+    </div>
+    <input class="search-box" id="search" placeholder="🔍 搜索页面标题或路径…" autocomplete="off">
+  </div>
 </div>
 <div class="wrap">
   ${items.length
-    ? `<div class="cards">${cards}</div>`
+    ? sections
     : `<div class="empty">没扫到 html 页面。<br>这个项目可能是框架项目，直接 <a href="${baseUrl}/" target="_blank">打开首页</a> 试试。</div>`}
+  <div class="no-match" id="noMatch">没找到匹配的页面</div>
+
+  <div class="promo">
+    <h2>这个工具对你有用吗？</h2>
+    <div class="pdesc">「本地运行前端项目」开源免费，一键启动任意前端项目，不往项目里写任何文件。</div>
+    <div class="qr-grid">
+      <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/reward-qr.jpg" alt="赞赏"><div class="label">请作者喝奶茶</div></div>
+      <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/sticker-qr.png" alt="表情包"><div class="label">星星布丁表情包</div></div>
+      <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/group-qr.jpg" alt="粉丝群"><div class="label">加入粉丝群</div></div>
+    </div>
+  </div>
+
   <div class="ft">由 <a href="https://github.com/lyzbcy/local-run-frontend" target="_blank">本地运行前端项目</a> 生成</div>
 </div>
+<script>
+(function(){
+  var input = document.getElementById('search');
+  var noMatch = document.getElementById('noMatch');
+  var sections = document.querySelectorAll('.section');
+  if(!input) return;
+  input.addEventListener('input', function(){
+    var q = input.value.trim().toLowerCase();
+    var totalShown = 0;
+    sections.forEach(function(sec){
+      var cards = sec.querySelectorAll('.card');
+      var shown = 0;
+      cards.forEach(function(c){
+        var s = c.getAttribute('data-search') || '';
+        var hit = !q || s.indexOf(q) !== -1;
+        c.style.display = hit ? '' : 'none';
+        if(hit) shown++;
+      });
+      // 整个分类没匹配就隐藏分类标题
+      sec.style.display = shown ? '' : 'none';
+      totalShown += shown;
+    });
+    noMatch.style.display = totalShown ? 'none' : '';
+  });
+})();
+</script>
 </body>
 </html>`;
 }
