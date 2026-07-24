@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- CSP：允许加载本地 css/js，禁止远程脚本 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:* http://localhost:* https://api.github.com;">
+  <title>本地运行前端项目</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 标题栏（mac 自定义红绿灯留位） -->
+    <header class="titlebar">
+      <div class="drag-region">
+        <div class="logo">🚀</div>
+        <div class="title">本地运行前端项目 <span id="version" class="ver"></span></div>
+      </div>
+      <div class="titlebar-actions">
+        <button id="btnAbout" class="icon-btn" title="关于 / 推广">💖</button>
+      </div>
+    </header>
+
+    <!-- 侧边导航 -->
+    <div class="layout">
+      <aside class="sidebar">
+        <nav class="nav">
+          <button class="nav-item active" data-view="mine">📂 <span>我的项目</span></button>
+          <button class="nav-item" data-view="favorites">⭐ <span>收藏</span></button>
+          <button class="nav-item" data-view="recent">🕐 <span>最近</span></button>
+          <button class="nav-item" data-view="ports">🔌 <span>网关端口</span></button>
+          <button class="nav-item" data-view="agent">🤖 <span>AI Agent</span></button>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="hint">不写文件到你的项目 ✨</div>
+        </div>
+      </aside>
+
+      <!-- 主内容 -->
+      <main class="content">
+        <!-- 顶部操作条 -->
+        <div class="toolbar">
+          <div class="view-title" id="viewTitle">我的项目</div>
+          <div class="toolbar-actions">
+            <button id="btnAdd" class="primary-btn">＋ 添加项目</button>
+            <button id="btnRefresh" class="ghost-btn" title="刷新">🔄</button>
+          </div>
+        </div>
+
+        <!-- 项目列表视图 -->
+        <section id="view-projects" class="view active">
+          <div id="projectGrid" class="project-grid"></div>
+          <div id="emptyState" class="empty-state" style="display:none">
+            <div class="empty-emoji">🌱</div>
+            <div class="empty-title">还没有项目</div>
+            <div class="empty-desc">点击右上角「添加项目」，选择一个前端项目目录<br>我们会自动识别类型，一键启动，<b>不往项目里写任何文件</b>。</div>
+            <button class="primary-btn big" id="btnEmptyAdd">＋ 添加第一个项目</button>
+          </div>
+        </section>
+
+        <!-- 网关端口视图 -->
+        <section id="view-ports" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">🔌 运行中的端口</div>
+              <button id="btnPortsRefresh" class="ghost-btn">刷新</button>
+            </div>
+            <div class="panel-desc">本软件启动预览时占用的端口会列在这里。启动新项目时会自动顺延选择空闲端口。可手动停掉某个端口的服务。</div>
+            <div id="portsList" class="ports-list"></div>
+          </div>
+        </section>
+
+        <!-- AI Agent 视图 -->
+        <section id="view-agent" class="view">
+          <div class="panel">
+            <div class="panel-title">🤖 AI-Agent 接入</div>
+            <div class="panel-desc">让你的 AI Agent（Cursor / Claude / ZCode 等）通过下面的本地 HTTP 接口控制本软件，实现「用自然语言启动/关闭前端项目」。</div>
+            <div class="agent-block">
+              <div class="agent-label">控制接口地址（POST/GET · 仅本机）</div>
+              <div class="code-block">http://127.0.0.1:47800</div>
+            </div>
+            <div class="agent-block">
+              <div class="agent-label">可用端点</div>
+              <pre class="code-block small">GET  /status          运行中的实例
+GET  /projects        项目列表
+POST /start   {"id"}  启动项目（自动开浏览器 + 目录页）
+POST /stop    {"id"}  关闭项目</pre>
+            </div>
+            <div class="agent-block">
+              <div class="agent-label">喂给 AI Agent 的 Prompt（复制下面这段）</div>
+              <pre id="agentPrompt" class="code-block small selectable"></pre>
+              <button id="btnCopyPrompt" class="ghost-btn">📋 复制 Prompt</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- 添加项目对话框 -->
+    <div id="addModal" class="modal" style="display:none">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="modal-title">添加项目</div>
+        <div class="form-row">
+          <label>项目目录</label>
+          <div class="path-row">
+            <input id="addPath" type="text" class="input" placeholder="点击右侧选择…" readonly>
+            <button id="btnPick" class="ghost-btn">选择…</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>显示名（可选）</label>
+          <input id="addName" type="text" class="input" placeholder="默认用目录名">
+        </div>
+        <div id="detectInfo" class="detect-info" style="display:none"></div>
+        <div class="form-row" id="cmdRow" style="display:none">
+          <label>启动命令（可改）</label>
+          <input id="addCmd" type="text" class="input">
+        </div>
+        <div class="modal-actions">
+          <button id="btnCancelAdd" class="ghost-btn">取消</button>
+          <button id="btnConfirmAdd" class="primary-btn" disabled>添加</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 关于 / 推广对话框 -->
+    <div id="aboutModal" class="modal" style="display:none">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card wide">
+        <div class="modal-title">💖 关于「本地运行前端项目」</div>
+        <div class="about-intro">
+          一键启动任意前端项目，不往项目里写任何文件。<br>
+          开源免费，由 <b>捞鱼</b> 倾心制作。
+        </div>
+        <div class="qr-grid">
+          <div class="qr-cell">
+            <img src="../assets/reward-qr.png" alt="赞赏" onerror="this.parentNode.querySelector('.qr-fallback').style.display='flex';this.style.display='none';">
+            <div class="qr-fallback" style="display:none">💝<br>赞赏码</div>
+            <div class="qr-label">💰 请作者喝杯奶茶</div>
+          </div>
+          <div class="qr-cell">
+            <img src="../assets/sticker-qr.png" alt="表情包" onerror="this.parentNode.querySelector('.qr-fallback').style.display='flex';this.style.display='none';">
+            <div class="qr-fallback" style="display:none">😺<br>表情包</div>
+            <div class="qr-label">😺 星星布丁表情包</div>
+          </div>
+          <div class="qr-cell">
+            <img src="../assets/group-qr.png" alt="粉丝群" onerror="this.parentNode.querySelector('.qr-fallback').style.display='flex';this.style.display='none';">
+            <div class="qr-fallback" style="display:none">💬<br>粉丝群</div>
+            <div class="qr-label">💬 加入粉丝群</div>
+          </div>
+        </div>
+        <div class="mascot-row">
+          <img src="../assets/mascot.png" alt="mascot" class="mascot" onerror="this.style.display='none';">
+          <div class="mascot-text">「一个弱小但有梦想的开发者 🐟」<br><a href="https://lyzbcy.github.io/" id="aboutLyzbcyLink">👉 了解捞鱼</a></div>
+        </div>
+        <div class="modal-actions">
+          <button class="primary-btn" id="btnAboutClose">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 更新提示 -->
+    <div id="updateModal" class="modal" style="display:none">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="modal-title">🎉 发现新版本</div>
+        <div id="updateBody" class="update-body"></div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="btnUpdateLater">稀后再说</button>
+          <a id="updateLink" class="primary-btn" href="#" target="_blank" rel="noopener">前往下载</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- toast -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "local-run-frontend",
+  "version": "0.1.0",
+  "description": "本地运行前端项目 - 一键启动任意前端项目的桌面工具",
+  "private": true,
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "author": "lyzbcy <lyzbcy@github.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/lyzbcy/local-run-frontend",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lyzbcy/local-run-frontend.git"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0"
+  }
+}
