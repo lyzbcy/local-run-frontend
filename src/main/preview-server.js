@@ -122,45 +122,71 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(projectName)} · 目录页</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg: #FAF8FF; --bg-soft: #F5F0FA; --card: #ffffff;
+    --primary: #7C3AED; --primary-d: #6D28D9; --primary-bg: #F0EBFA;
+    --pink: #EC4899; --pink-bg: #FCE7F3;
+    --text: #4C1D95; --text-2: #6B7280; --text-3: #9CA3AF;
+    --border: #EDE7F5;
+    --shadow: 0 4px 16px rgba(124,58,237,.08);
+    --shadow-lg: 0 12px 32px rgba(124,58,237,.16);
+  }
   * { box-sizing: border-box; }
-  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
-         background:#f5f7fa; color:#1d2129; }
-  .hd { padding:18px 28px; background:linear-gradient(135deg,#409eff,#36cfc9); color:#fff;
-        position:sticky; top:0; z-index:3; box-shadow:0 2px 8px rgba(0,0,0,.08); }
-  .hd-top { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
-  .hd h1 { margin:0; font-size:20px; font-weight:600; }
-  .hd .sub { font-size:13px; opacity:.9; margin-top:6px; }
+  body { margin:0; font-family:"ZCOOL KuaiLe",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--text); }
+  .hd { padding:22px 28px; background:linear-gradient(135deg,#7C3AED,#EC4899); color:#fff;
+        position:sticky; top:0; z-index:3; box-shadow:0 4px 20px rgba(124,58,237,.25); }
+  .hd-top { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; max-width:1200px; margin:0 auto; }
+  .hd h1 { margin:0; font-size:24px; font-weight:400; letter-spacing:1px; }
+  .hd .sub { font-size:13px; opacity:.92; margin-top:6px; font-family:-apple-system,sans-serif; }
   .hd .sub a { color:#fff; text-decoration:underline; }
-  .search-box { background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3); border-radius:8px;
-    padding:8px 14px; color:#fff; font-size:14px; width:280px; max-width:100%; backdrop-filter:blur(4px); }
-  .search-box::placeholder { color:rgba(255,255,255,.7); }
-  .search-box:focus { outline:none; background:rgba(255,255,255,.28); }
-  .wrap { max-width:1200px; margin:0 auto; padding:20px 28px; }
-  .section { margin-bottom:24px; }
-  .section-title { font-size:15px; font-weight:600; color:#4e5969; margin-bottom:12px;
+  .search-box { background:rgba(255,255,255,.22); border:1px solid rgba(255,255,255,.35); border-radius:999px;
+    padding:10px 18px; color:#fff; font-size:14px; width:280px; max-width:100%; font-family:-apple-system,sans-serif; }
+  .search-box::placeholder { color:rgba(255,255,255,.75); }
+  .search-box:focus { outline:none; background:rgba(255,255,255,.32); }
+  .wrap { max-width:1200px; margin:0 auto; padding:24px 28px 80px; }
+  .section { margin-bottom:28px; }
+  .section-title { font-size:18px; color:var(--primary-d); margin-bottom:14px;
     display:flex; align-items:center; gap:8px; }
-  .count { font-size:12px; background:#e8f3ff; color:#409eff; padding:1px 8px; border-radius:10px; font-weight:400; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
-  .card { display:flex; flex-direction:column; gap:6px; padding:14px 16px; background:#fff;
-          border:1px solid #e5e6eb; border-radius:10px; text-decoration:none; color:#1d2129;
-          transition:all .18s; }
-  .card:hover { transform:translateY(-2px); border-color:#409eff; box-shadow:0 6px 16px rgba(64,158,255,.18); }
-  .ct { font-size:14px; font-weight:500; display:flex; align-items:center; gap:8px; }
-  .cu { font-size:11px; color:#86909c; word-break:break-all; font-family:ui-monospace,Menlo,monospace; }
-  .tag { font-size:11px; background:#e8f3ff; color:#409eff; padding:2px 8px; border-radius:10px; font-weight:400; }
-  .empty { text-align:center; padding:60px 20px; color:#86909c; }
-  .no-match { display:none; text-align:center; padding:40px; color:#86909c; }
-  /* 推广区 */
-  .promo { margin-top:32px; padding:28px; background:#fff; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
-  .promo h2 { margin:0 0 6px; font-size:16px; text-align:center; }
-  .promo .pdesc { text-align:center; color:#86909c; font-size:13px; margin-bottom:20px; }
-  .qr-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; max-width:520px; margin:0 auto; }
+  .count { font-size:13px; background:var(--primary-bg); color:var(--primary); padding:2px 10px; border-radius:999px; font-family:-apple-system,sans-serif; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; }
+  .card { display:flex; flex-direction:column; gap:6px; padding:16px 18px; background:var(--card);
+          border:1px solid var(--border); border-radius:18px; text-decoration:none; color:var(--text);
+          transition:all .2s; box-shadow:var(--shadow); }
+  .card:hover { transform:translateY(-3px); border-color:var(--primary); box-shadow:var(--shadow-lg); }
+  .ct { font-size:16px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .cu { font-size:11px; color:var(--text-3); word-break:break-all; font-family:ui-monospace,Menlo,monospace; }
+  .tag { font-size:11px; background:var(--pink-bg); color:var(--pink); padding:2px 10px; border-radius:999px; font-family:-apple-system,sans-serif; }
+  .empty { text-align:center; padding:60px 20px; color:var(--text-3); font-family:-apple-system,sans-serif; }
+  .no-match { display:none; text-align:center; padding:40px; color:var(--text-3); font-family:-apple-system,sans-serif; }
+  /* 浮动「关于捞鱼」按钮 */
+  .fab { position:fixed; right:28px; bottom:28px; width:56px; height:56px; border-radius:50%;
+    background:linear-gradient(135deg,#7C3AED,#EC4899); color:#fff; border:none; cursor:pointer; font-size:24px;
+    box-shadow:0 8px 24px rgba(124,58,237,.4); z-index:10; transition:transform .2s; display:flex; align-items:center; justify-content:center; }
+  .fab:hover { transform:scale(1.1) rotate(8deg); }
+  /* 推广弹窗（点击 FAB 才出现） */
+  .modal { position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center; }
+  .modal.show { display:flex; }
+  .modal-mask { position:absolute; inset:0; background:rgba(76,29,149,.4); backdrop-filter:blur(2px); }
+  .modal-card { position:relative; background:var(--card); border-radius:24px; padding:28px 32px; width:480px; max-width:92vw;
+    box-shadow:0 24px 60px rgba(124,58,237,.3); }
+  .modal-card h2 { margin:0 0 4px; font-size:22px; color:var(--primary-d); text-align:center; font-weight:400; }
+  .modal-card .intro { text-align:center; color:var(--text-2); font-size:13px; line-height:1.8; margin:14px 0 22px; font-family:-apple-system,sans-serif; }
+  .modal-card .intro b { color:var(--pink); }
+  .qr-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
   .qr-cell { text-align:center; }
-  .qr-cell img { width:120px; height:120px; object-fit:cover; border-radius:8px; border:1px solid #f0f1f3; }
-  .qr-cell .label { font-size:12px; color:#4e5969; margin-top:6px; }
-  .ft { text-align:center; padding:24px; color:#c9cdd4; font-size:12px; }
-  .ft a { color:#409eff; text-decoration:none; }
+  .qr-cell img { width:110px; height:110px; object-fit:cover; border-radius:14px; border:2px solid var(--border); }
+  .qr-cell .label { font-size:12px; color:var(--text-2); margin-top:8px; font-family:-apple-system,sans-serif; }
+  .author { display:flex; align-items:center; gap:12px; margin-top:22px; padding:14px; background:var(--bg-soft); border-radius:14px; }
+  .author img { width:48px; height:48px; border-radius:50%; }
+  .author .atext { font-size:13px; color:var(--text-2); line-height:1.6; font-family:-apple-system,sans-serif; }
+  .author .atext a { color:var(--primary); text-decoration:none; }
+  .modal-close { position:absolute; top:14px; right:18px; background:none; border:none; font-size:24px; color:var(--text-3); cursor:pointer; }
+  .ft { text-align:center; padding:30px 0 0; color:var(--text-3); font-size:12px; font-family:-apple-system,sans-serif; }
+  .ft a { color:var(--primary); text-decoration:none; }
 </style>
 </head>
 <body>
@@ -170,7 +196,7 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
       <h1>${escapeHtml(projectName)} · 目录页</h1>
       <div class="sub">共 ${items.length} 个页面，按栏目分类 ｜ <a href="${baseUrl}/" target="_blank">打开首页 ${baseUrl}/</a></div>
     </div>
-    <input class="search-box" id="search" placeholder="🔍 搜索页面标题或路径…" autocomplete="off">
+    <input class="search-box" id="search" placeholder="搜索页面标题或路径…" autocomplete="off">
   </div>
 </div>
 <div class="wrap">
@@ -178,43 +204,61 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
     ? sections
     : `<div class="empty">没扫到 html 页面。<br>这个项目可能是框架项目，直接 <a href="${baseUrl}/" target="_blank">打开首页</a> 试试。</div>`}
   <div class="no-match" id="noMatch">没找到匹配的页面</div>
+  <div class="ft">由 <a href="https://github.com/lyzbcy/local-run-frontend" target="_blank">本地运行前端项目</a> 生成</div>
+</div>
 
-  <div class="promo">
-    <h2>这个工具对你有用吗？</h2>
-    <div class="pdesc">「本地运行前端项目」开源免费，一键启动任意前端项目，不往项目里写任何文件。</div>
+<button class="fab" id="fab" title="关于捞鱼">🐟</button>
+<div class="modal" id="aboutModal">
+  <div class="modal-mask" id="modalMask"></div>
+  <div class="modal-card">
+    <button class="modal-close" id="modalClose">×</button>
+    <h2>关于这个工具</h2>
+    <div class="intro">「本地运行前端项目」一键启动任意前端项目，<b>不往项目里写任何文件</b>。<br>开源免费，希望对你有用 🐟</div>
     <div class="qr-grid">
-      <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/reward-qr.jpg" alt="赞赏"><div class="label">请作者喝奶茶</div></div>
+      <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/reward-qr.jpg" alt="赞赏"><div class="label">请喝奶茶</div></div>
       <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/sticker-qr.png" alt="表情包"><div class="label">星星布丁表情包</div></div>
       <div class="qr-cell"><img src="https://lyzbcy.github.io/local-run-frontend/assets/group-qr.jpg" alt="粉丝群"><div class="label">加入粉丝群</div></div>
     </div>
+    <div class="author">
+      <img src="https://lyzbcy.github.io/local-run-frontend/assets/sticker/mascot.png" alt="捞鱼">
+      <div class="atext">「一个弱小但有梦想的开发者 🐟」<br><a href="https://lyzbcy.github.io/" target="_blank">了解捞鱼 →</a></div>
+    </div>
   </div>
-
-  <div class="ft">由 <a href="https://github.com/lyzbcy/local-run-frontend" target="_blank">本地运行前端项目</a> 生成</div>
 </div>
+
 <script>
 (function(){
   var input = document.getElementById('search');
   var noMatch = document.getElementById('noMatch');
   var sections = document.querySelectorAll('.section');
-  if(!input) return;
-  input.addEventListener('input', function(){
-    var q = input.value.trim().toLowerCase();
-    var totalShown = 0;
-    sections.forEach(function(sec){
-      var cards = sec.querySelectorAll('.card');
-      var shown = 0;
-      cards.forEach(function(c){
-        var s = c.getAttribute('data-search') || '';
-        var hit = !q || s.indexOf(q) !== -1;
-        c.style.display = hit ? '' : 'none';
-        if(hit) shown++;
+  if(input){
+    input.addEventListener('input', function(){
+      var q = input.value.trim().toLowerCase();
+      var totalShown = 0;
+      sections.forEach(function(sec){
+        var cards = sec.querySelectorAll('.card');
+        var shown = 0;
+        cards.forEach(function(c){
+          var s = c.getAttribute('data-search') || '';
+          var hit = !q || s.indexOf(q) !== -1;
+          c.style.display = hit ? '' : 'none';
+          if(hit) shown++;
+        });
+        sec.style.display = shown ? '' : 'none';
+        totalShown += shown;
       });
-      // 整个分类没匹配就隐藏分类标题
-      sec.style.display = shown ? '' : 'none';
-      totalShown += shown;
+      noMatch.style.display = totalShown ? 'none' : '';
     });
-    noMatch.style.display = totalShown ? 'none' : '';
-  });
+  }
+  // 关于弹窗
+  var modal = document.getElementById('aboutModal');
+  var open = function(){ if(modal) modal.classList.add('show'); };
+  var close = function(){ if(modal) modal.classList.remove('show'); };
+  var fab = document.getElementById('fab');
+  if(fab) fab.addEventListener('click', open);
+  var mc = document.getElementById('modalClose'); if(mc) mc.addEventListener('click', close);
+  var mask = document.getElementById('modalMask'); if(mask) mask.addEventListener('click', close);
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') close(); });
 })();
 </script>
 </body>
