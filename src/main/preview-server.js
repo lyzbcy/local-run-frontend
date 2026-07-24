@@ -168,11 +168,31 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
     // 别名
     if (routeAliases[urlPath]) urlPath = routeAliases[urlPath];
 
+    // mobile 前缀剥离：很多移动端项目 HTML 用相对路径引用资源，
+    // 从 /mobile/xxx 或 /m/xxx 进入时，相对路径会多一层 /mobile 前缀导致 404。
+    // 这里做通用兜底：如果带 /mobile/ 或 /m/ 前缀且文件不存在，剥掉前缀重试。
+    const stripMobilePrefix = (p) => {
+      if (p.startsWith('/mobile/')) return p.replace('/mobile/', '/');
+      if (p.startsWith('/m/') && !routeAliases[p]) return p.replace('/m/', '/');
+      return p;
+    };
+
     let filePath = path.normalize(path.join(root, urlPath));
 
     // 防穿越
     if (!filePath.startsWith(root)) {
       res.writeHead(403); res.end('Forbidden'); return;
+    }
+
+    // mobile 前缀剥离兜底：文件不存在时，剥掉 /mobile/ 或 /m/ 前缀重试
+    if (!fs.existsSync(filePath) && (urlPath.startsWith('/mobile/') || urlPath.startsWith('/m/'))) {
+      const stripped = stripMobilePrefix(urlPath);
+      if (stripped !== urlPath) {
+        const strippedPath = path.normalize(path.join(root, stripped));
+        if (strippedPath.startsWith(root) && fs.existsSync(strippedPath)) {
+          filePath = strippedPath;
+        }
+      }
     }
 
     // 解析真实文件路径。先 stat，根据结果决定回退策略。
