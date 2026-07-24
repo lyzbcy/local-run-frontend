@@ -68,20 +68,23 @@ function switchView(view) {
   currentView = view;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   $$('.view').forEach(v => v.classList.remove('active'));
-  const titles = { mine: '我的项目', favorites: '收藏', recent: '最近', ports: '网关端口', agent: 'AI Agent 接入' };
+  const titles = { mine: '我的项目', favorites: '收藏', recent: '最近', ports: '网关端口', agent: 'AI Agent 接入', logs: '运行日志' };
   $('#viewTitle').textContent = titles[view] || '';
 
+  $('#view-projects').classList.remove('active');
+  $('#view-ports').classList.remove('active');
+  $('#view-agent').classList.remove('active');
+  $('#view-logs').classList.remove('active');
   if (view === 'ports') {
-    $('#view-projects').classList.remove('active');
     $('#view-ports').classList.add('active');
     renderPorts();
   } else if (view === 'agent') {
-    $('#view-projects').classList.remove('active');
     $('#view-agent').classList.add('active');
     fillAgentPrompt();
+  } else if (view === 'logs') {
+    $('#view-logs').classList.add('active');
+    renderLogs();
   } else {
-    $('#view-ports').classList.remove('active');
-    $('#view-agent').classList.remove('active');
     $('#view-projects').classList.add('active');
     render();
   }
@@ -94,6 +97,7 @@ function bindToolbar() {
   $('#btnRefresh').addEventListener('click', async () => { await refreshStore(); render(); toast('已刷新'); });
   $('#btnPortsRefresh').addEventListener('click', () => renderPorts());
   $('#btnAbout').addEventListener('click', () => $('#aboutModal').style.display = 'flex');
+  $('#btnLogsClear').addEventListener('click', async () => { await window.api.clearLogs(); renderLogs(); });
   // empty state / modal close buttons
   $('#btnEmptyAdd').addEventListener('click', openAddModal);
   $('#btnAboutClose').addEventListener('click', () => $('#aboutModal').style.display = 'none');
@@ -336,6 +340,25 @@ async function maybeRefreshPorts() {
   const status = await window.api.runnerStatus();
   const sig = status.map(s => s.projectId + ':' + s.port).join(',');
   if (sig !== lastPortsSig) { lastPortsSig = sig; renderPorts(); }
+}
+
+// --- 日志 ---
+async function renderLogs() {
+  const logs = await window.api.getLogs();
+  const box = $('#logsBox');
+  if (!logs || !logs.length) {
+    box.innerHTML = '<div class="logs-empty">还没有日志。启动或停止一个项目，日志会出现在这里。</div>';
+    return;
+  }
+  const levelClass = { ok: 'ok', warn: 'warn', error: 'err' };
+  const levelText = { info: '信息', ok: '成功', warn: '警告', error: '错误' };
+  box.innerHTML = logs.slice().reverse().map(l => {
+    const time = new Date(l.t).toLocaleTimeString('zh-CN', { hour12: false });
+    const lv = l.level || 'info';
+    return `<div class="log-row"><span class="log-time">${time}</span>` +
+           `<span class="log-level ${levelClass[lv] || ''}">${levelText[lv] || lv}</span>` +
+           `<span class="log-msg">${escapeHtml(l.msg)}</span></div>`;
+  }).join('');
 }
 
 // --- AI Agent ---

@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('api', {
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
   appVersion: () => ipcRenderer.invoke('app:version'),
 
+  // 日志系统
+  getLogs: () => ipcRenderer.invoke('logs:get'),
+  clearLogs: () => ipcRenderer.invoke('logs:clear'),
+
   // 事件
   onProjectLog: (cb) => {
     const h = (_e, payload) => cb(payload);
