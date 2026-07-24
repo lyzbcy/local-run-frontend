@@ -7,16 +7,23 @@ let store = { projects: [], settings: {} };
 let currentView = 'mine';
 
 const TYPE_LABELS = {
-  'static': '📦 静态',
-  'vite': '⚡ Vite',
-  'next': '▲ Next',
-  'nuxt': '▲ Nuxt',
-  'vue-cli': '🟢 Vue CLI',
-  'react-scripts': '⚛️ CRA',
-  'angular': '🅰️ Angular',
-  'generic-dev': '🛠️ npm dev',
-  'unknown': '❓ 未知'
+  'static': '静态',
+  'vite': 'Vite',
+  'next': 'Next',
+  'nuxt': 'Nuxt',
+  'vue-cli': 'Vue CLI',
+  'react-scripts': 'CRA',
+  'angular': 'Angular',
+  'generic-dev': 'npm dev',
+  'unknown': '未知'
 };
+
+// 设置启动/停止按钮：保留 img，只换文字和贴纸图。isStop=true 时贴纸用 cheer，加 stop 样式。
+function setBtnState(btn, sticker, text, isStop) {
+  if (!btn) return;
+  btn.innerHTML = `<img src="../assets/sticker/${sticker}.png" class="btn-sticker" alt=""> ${text}`;
+  btn.className = 'primary-btn btn-start-stop' + (isStop ? ' stop' : '');
+}
 
 function toast(msg, kind = '') {
   const t = $('#toast');
@@ -111,7 +118,7 @@ function render() {
   if (!list.length) {
     grid.innerHTML = '';
     let msg = '还没有项目';
-    if (currentView === 'favorites') msg = '还没有收藏的项目\n点项目卡片上的 ⭐ 收藏';
+    if (currentView === 'favorites') msg = '还没有收藏的项目\n点项目卡片上的收藏按钮收藏';
     else if (currentView === 'recent') msg = '还没有最近打开的项目';
     $('#emptyTitle') && ($('#emptyTitle').textContent = msg);
     empty.style.display = '';
@@ -130,11 +137,9 @@ function render() {
         const btn = card.querySelector('.btn-start-stop');
         if (runningIds.has(p.id)) {
           if (!badge) {}
-          btn.textContent = '⏹ 停止';
-          btn.className = 'primary-btn btn-start-stop stop';
+          setBtnState(btn, 'cheer', '停止', true);
         } else {
-          btn.textContent = '▶ 启动';
-          btn.className = 'primary-btn btn-start-stop';
+          setBtnState(btn, 'go', '启动', false);
         }
       }
     });
@@ -146,12 +151,13 @@ function render() {
 }
 
 function projectCardHtml(p) {
-  const typeLabel = TYPE_LABELS[p.type] || '❓';
+  const typeLabel = TYPE_LABELS[p.type] || '未知';
   const typeClass = p.framework ? 'type-framework' : (p.type === 'static' ? 'type-static' : 'type-unknown');
+  const iconSticker = p.framework ? 'go' : 'hello';
   return `
   <div class="card" id="card-${p.id}">
     <div class="card-head">
-      <div class="card-icon">${p.framework ? '⚡' : '📦'}</div>
+      <div class="card-icon"><img src="../assets/sticker/${iconSticker}.png" alt=""></div>
       <div class="card-main">
         <div class="card-name">${escapeHtml(p.name)}</div>
         <div class="card-path" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</div>
@@ -159,13 +165,13 @@ function projectCardHtml(p) {
     </div>
     <div class="card-tags">
       <span class="tag ${typeClass}">${typeLabel}</span>
-      <span class="tag running" style="display:none">● 运行中</span>
+      <span class="tag running" style="display:none">运行中</span>
     </div>
     <div class="card-actions">
-      <button class="primary-btn btn-start-stop">▶ 启动</button>
-      <button class="ghost-btn btn-reveal">📁 打开</button>
-      <button class="mini-btn btn-fav ${p.favorite ? 'active' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '⭐' : '☆'}</button>
-      <button class="mini-btn btn-del" title="删除">🗑</button>
+      <button class="primary-btn btn-start-stop"><img src="../assets/sticker/go.png" class="btn-sticker" alt=""> 启动</button>
+      <button class="ghost-btn btn-reveal">打开</button>
+      <button class="mini-btn btn-fav ${p.favorite ? 'active' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}"><img src="../assets/sticker/love.png" alt="收藏"></button>
+      <button class="mini-btn btn-del" title="删除">删除</button>
     </div>
   </div>`;
 }
@@ -201,7 +207,7 @@ async function onToggleStart(p) {
   if (starting.has(p.id)) return;
   starting.add(p.id);
   const btn = document.querySelector(`#card-${p.id} .btn-start-stop`);
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 启动中…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '启动中…'; }
   toast(`正在启动「${p.name}」…`);
   const r = await window.api.startProject(p.id);
   starting.delete(p.id);
@@ -255,7 +261,7 @@ async function pickDirectory() {
     $('#addCmd').value = r.startCommand;
   } else if (r.type === 'static') {
     info.className = 'detect-info';
-    info.innerHTML = `识别为 <b>📦 静态项目</b>，将用内置预览服务器启动，<b>不写任何文件</b>。`;
+    info.innerHTML = `识别为 <b>静态项目</b>，将用内置预览服务器启动，<b>不写任何文件</b>。`;
     $('#cmdRow').style.display = 'none';
   } else {
     info.className = 'detect-info warn';
@@ -293,7 +299,7 @@ async function renderPorts() {
   const status = await window.api.runnerStatus();
   const list = $('#portsList');
   if (!status.length) {
-    list.innerHTML = '<div class="ports-empty">🔌 当前没有运行中的预览服务<br>启动一个项目后，端口会出现在这里。</div>';
+    list.innerHTML = '<div class="ports-empty">当前没有运行中的预览服务<br>启动一个项目后，端口会出现在这里。</div>';
     return;
   }
   list.innerHTML = status.map(s => {

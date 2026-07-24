@@ -102,7 +102,7 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>📁 ${escapeHtml(projectName)} · 目录页</title>
+<title>${escapeHtml(projectName)} · 目录页</title>
 <style>
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
@@ -128,13 +128,13 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
 </head>
 <body>
 <div class="hd">
-  <h1>📁 ${escapeHtml(projectName)}</h1>
+  <h1>${escapeHtml(projectName)} · 目录页</h1>
   <div class="sub">共 ${items.length} 个页面 ｜ <a href="${baseUrl}/" target="_blank">打开首页 ${baseUrl}/</a></div>
 </div>
 <div class="wrap">
   ${items.length
     ? `<div class="cards">${cards}</div>`
-    : `<div class="empty">😮 没扫到 html 页面。<br>这个项目可能是框架项目，直接 <a href="${baseUrl}/" target="_blank">打开首页</a> 试试。</div>`}
+    : `<div class="empty">没扫到 html 页面。<br>这个项目可能是框架项目，直接 <a href="${baseUrl}/" target="_blank">打开首页</a> 试试。</div>`}
   <div class="ft">由 <a href="https://github.com/lyzbcy/local-run-frontend" target="_blank">本地运行前端项目</a> 生成</div>
 </div>
 </body>
