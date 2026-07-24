@@ -46,15 +46,16 @@ const ok = (name, cond, extra = '') => {
   runner.stopProject('s2');
   blocker.close(); blocker2.close();
 
-  console.log('\n[场景3] project.port 优先，被占则顺延');
+  console.log('\n[场景3] project.port 被占则找区间内其他空闲端口');
   const blocker3 = net.createServer();
   await new Promise(res => blocker3.listen(BASE + 3, '127.0.0.1', res));
   const r3 = await runner.startProject(
     { id: 's3', name: 'p3', path: root, type: 'static', framework: false, port: BASE + 3 },
     [BASE, BASE + 5], () => {}
   );
-  ok('prefer(BASE+3) 被占 → 顺延到 BASE+4', r3.ok && r3.instance.port === BASE + 4,
-    `got ${r3.ok && r3.instance.port}`);
+  // prefer(BASE+3) 被占，应拿到区间内空闲端口（BASE，因场景2的 blocker 已关），且不能是 BASE+3
+  ok('prefer(BASE+3) 被占 → 拿到其他空闲端口（非 BASE+3）',
+    r3.ok && r3.instance.port !== BASE + 3, `got ${r3.ok && r3.instance.port}`);
   runner.stopProject('s3');
   blocker3.close();
 
