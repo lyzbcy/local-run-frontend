@@ -168,15 +168,6 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
     // 别名
     if (routeAliases[urlPath]) urlPath = routeAliases[urlPath];
 
-    // mobile 前缀剥离：很多移动端项目 HTML 用相对路径引用资源，
-    // 从 /mobile/xxx 或 /m/xxx 进入时，相对路径会多一层 /mobile 前缀导致 404。
-    // 这里做通用兜底：如果带 /mobile/ 或 /m/ 前缀且文件不存在，剥掉前缀重试。
-    const stripMobilePrefix = (p) => {
-      if (p.startsWith('/mobile/')) return p.replace('/mobile/', '/');
-      if (p.startsWith('/m/') && !routeAliases[p]) return p.replace('/m/', '/');
-      return p;
-    };
-
     let filePath = path.normalize(path.join(root, urlPath));
 
     // 防穿越
@@ -184,13 +175,18 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
       res.writeHead(403); res.end('Forbidden'); return;
     }
 
-    // mobile 前缀剥离兜底：文件不存在时，剥掉 /mobile/ 或 /m/ 前缀重试
-    if (!fs.existsSync(filePath) && (urlPath.startsWith('/mobile/') || urlPath.startsWith('/m/'))) {
-      const stripped = stripMobilePrefix(urlPath);
-      if (stripped !== urlPath) {
-        const strippedPath = path.normalize(path.join(root, stripped));
-        if (strippedPath.startsWith(root) && fs.existsSync(strippedPath)) {
-          filePath = strippedPath;
+    // 通用前缀剥离兜底：很多静态项目 HTML 用相对路径引用资源，
+    // 从子目录（如 /seo/、/mobile/、/m/）进入时，浏览器会把相对路径多解析出一层前缀，
+    // 但资源实际在项目根目录。这里逐级剥掉前缀目录重试，自动适配任何项目。
+    if (!fs.existsSync(filePath)) {
+      const parts = urlPath.split('/').filter(Boolean); // ['seo','image','svg','aizs.svg']
+      // 逐级剥前缀：试剥 1 级、2 级，命中即用
+      for (let strip = 1; strip <= 2 && strip < parts.length; strip++) {
+        const candidate = '/' + parts.slice(strip).join('/');
+        const candidatePath = path.normalize(path.join(root, candidate));
+        if (candidatePath.startsWith(root) && fs.existsSync(candidatePath)) {
+          filePath = candidatePath;
+          break;
         }
       }
     }

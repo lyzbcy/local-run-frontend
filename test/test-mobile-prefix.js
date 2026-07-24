@@ -54,8 +54,23 @@ function get(url) {
   ok('/css/header.css 直接访问 → 200', (await get(base + '/css/header.css')) === 200);
   ok('/casePage/caseIndex.html → 200', (await get(base + '/casePage/caseIndex.html')) === 200);
 
+  console.log('\n[通用前缀剥离] 任意项目前缀都能剥离（seo/pc/任意名）');
+  // 造一个 seo 子目录场景：/seo/image/x → 根 /image/x
+  fs.mkdirSync(path.join(root, 'seo'));
+  fs.mkdirSync(path.join(root, 'seo', 'page'));
+  fs.writeFileSync(path.join(root, 'seo', 'page', 'index.html'),
+    '<link rel="stylesheet" href="../../css/header.css">');
+  ok('/seo/css/header.css → 剥 seo → 200', (await get(base + '/seo/css/header.css')) === 200);
+  ok('/seo/image/logo.png → 剥 seo → 200', (await get(base + '/seo/image/logo.png')) === 200);
+  ok('/pc/css/header.css → 剥 pc → 200（任意前缀）', (await get(base + '/pc/css/header.css')) === 200);
+  ok('/whatever/js/common.js → 剥 whatever → 200', (await get(base + '/whatever/js/common.js')) === 200);
+
+  console.log('\n[通用前缀剥离] 两级前缀');
+  ok('/a/b/css/header.css → 剥两级 → 200', (await get(base + '/a/b/css/header.css')) === 200);
+
   console.log('\n[不影响] 真不存在的资源仍 404');
   ok('/mobile/noexist.xyz → 404（不是无脑 200）', (await get(base + '/mobile/noexist.xyz')) === 404);
+  ok('/seo/noexist.xyz → 404', (await get(base + '/seo/noexist.xyz')) === 404);
 
   server.close();
   fs.rmSync(root, { recursive: true, force: true });
