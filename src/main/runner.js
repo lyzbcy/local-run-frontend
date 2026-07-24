@@ -86,7 +86,7 @@ function extractPortFromOutput(output) {
 }
 
 // 启动框架项目的 dev server（子进程）
-async function startFramework(project, portRange, log) {
+async function startFramework(project, portRange, log, options = {}) {
   const preferPort = await findFreePort(portRange[0], portRange[1], project.port);
   const cmd = project.startCommand || 'npm run dev';
   const bin = cmd.split(/\s+/)[0];
@@ -97,9 +97,11 @@ async function startFramework(project, portRange, log) {
     ...process.env,
     ELECTRON_RUN_AS_NODE: undefined
   };
-  if (process.platform === 'darwin') {
-    env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH || ''}`;
-  }
+  // 拼 PATH：.app 双击时默认 PATH 极短，不含 nvm/volta。把探测到的 node binDir 放最前。
+  const extraPaths = [];
+  if (options.nodeBinDir) extraPaths.push(options.nodeBinDir);
+  if (process.platform === 'darwin') extraPaths.push('/opt/homebrew/bin', '/usr/local/bin');
+  if (extraPaths.length) env.PATH = [...extraPaths, env.PATH || ''].join(':');
 
   const proc = spawn(bin, args, {
     cwd: project.path,
@@ -185,13 +187,13 @@ async function startFramework(project, portRange, log) {
   };
 }
 
-async function startProject(project, portRange, log = () => {}) {
+async function startProject(project, portRange, log = () => {}, options = {}) {
   if (instances.has(project.id)) {
     return { ok: true, instance: instances.get(project.id), already: true };
   }
   try {
     const inst = project.framework
-      ? await startFramework(project, portRange, log)
+      ? await startFramework(project, portRange, log, options)
       : await startStatic(project, portRange, log);
     instances.set(project.id, inst);
     return { ok: true, instance: inst };

@@ -40,22 +40,43 @@ async function checkUpdate(repo) {
   }
 }
 
-// 探测系统 node 版本（框架项目启动需要）。缺失返回 null。
+// 探测系统 node（框架项目启动需要）。
+// .app 双击启动时 PATH 很短，不含 nvm/volta 等，所以不能只靠 which，要扫所有常见安装位置。
 function detectNode() {
+  const home = process.env.HOME || '';
+  // 候选 node 路径（按优先级）。nvm 要展开版本目录，单独处理。
+  const candidates = [
+    '/opt/homebrew/bin/node',        // homebrew arm64
+    '/usr/local/bin/node',           // homebrew intel / 官方 pkg
+    '/usr/bin/node',                 // 系统自带
+    path.join(home, '.volta/bin/node'), // volta
+    path.join(home, '.fnm/aliases/default/bin/node') // fnm
+  ];
+  // nvm：可能有多个版本，取最新（目录名按版本号排序）
   try {
-    const out = execFileSync(process.platform === 'win32' ? 'where' : 'which',
-      ['node'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    if (!out) return null;
-    // 顺带拿版本
-    try {
-      const ver = execFileSync(out, ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-      return { path: out.split(/\r?\n/)[0], version: ver };
-    } catch {
-      return { path: out.split(/\r?\n/)[0], version: null };
+    const nvmDir = path.join(home, '.nvm', 'versions', 'node');
+    if (fs.existsSync(nvmDir)) {
+      const versions = fs.readdirSync(nvmDir).filter(v => v.startsWith('v')).sort();
+      if (versions.length) candidates.push(path.join(nvmDir, versions[versions.length - 1], 'bin', 'node'));
     }
-  } catch {
-    return null;
+  } catch {}
+  // 再试 which（万一 PATH 里就有）
+  try {
+    const which = execFileSync('which', ['node'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (which) candidates.unshift(which.split(/\r?\n/)[0]); // which 的优先
+  } catch {}
+
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) {
+      try {
+        const ver = execFileSync(p, ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+        return { path: p, version: ver, binDir: path.dirname(p) };
+      } catch {
+        return { path: p, version: null, binDir: path.dirname(p) };
+      }
+    }
   }
+  return null;
 }
 
 function createWindow() {
@@ -147,6 +168,7 @@ ipcMain.handle('project:start', async (e, { id }) => {
   logger.info(`启动项目「${project.name}」（${project.type}）`, { projectId: id });
 
   // 框架项目需要系统 node，先探测
+  let nodeBinDir = null;
   if (project.framework) {
     const node = detectNode();
     if (!node) {
@@ -155,13 +177,14 @@ ipcMain.handle('project:start', async (e, { id }) => {
       return { ok: false, error: err };
     }
     logger.ok(`系统 node：${node.version || '(版本未知)'} @ ${node.path}`);
+    nodeBinDir = node.binDir; // 传给 runner，加进子进程 PATH（.app 双击时 PATH 不含 nvm）
   }
 
   // 记录打开时间 + 端口
   const { data: next } = store.updateProject(data, id, { lastOpenedAt: new Date().toISOString() });
   store.save(next);
 
-  const r = await runner.startProject(project, data.settings.portRange, log);
+  const r = await runner.startProject(project, data.settings.portRange, log, { nodeBinDir });
   if (r.ok) {
     // 记录端口
     const d2 = store.load();
