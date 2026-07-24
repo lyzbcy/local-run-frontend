@@ -117,7 +117,7 @@ async function startFramework(project, portRange, log) {
 
   const FLUSH_MS = 200;
   const FLUSH_MAX = 2000; // 攒到这个量也立即 flush
-  const NOISE_RE = /DEPRECATION WARNING|@charset must precede|mixed-decls|repetitive deprecation|postcss|glob option "as"|Failed to run dependency scan/i;
+  const NOISE_RE = /DEPRECATION WARNING|@charset must precede|mixed-decls|repetitive deprecation|postcss|glob option "as"|Failed to run dependency scan|rules will be changing|behavior for declarations|move the declaration|opt into the new behavior|nested rule|root stylesheet|Run in verbose mode|could not be resolved|Are they installed|Skipping dependency/i;
 
   const flushLogs = (force) => {
     if (!pendingLogs && !noiseCount) return;
