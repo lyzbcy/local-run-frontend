@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- CSP：允许内联脚本（版本检查需要）+ 加载本地图片 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob: https:; connect-src 'self' https://api.github.com;">
+<title>本地运行前端项目 · 一键启动任意前端项目</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+<style>
+:root {
+  --bg:#f5f7fa;--card:#fff;--text:#1d2129;--text2:#4e5969;--text3:#86909c;
+  --primary:#409eff;--primary-d:#2b8ae8;--primary-bg:#e8f3ff;--radius:12px;
+  --shadow:0 4px 16px rgba(0,0,0,.08);--shadow-lg:0 12px 40px rgba(64,158,255,.18);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+.container{max-width:920px;margin:0 auto;padding:0 20px}
+
+/* Hero */
+.hero{background:linear-gradient(135deg,#409eff 0%,#36cfc9 100%);color:#fff;padding:70px 0 60px;text-align:center}
+.hero .logo{font-size:72px;margin-bottom:12px;animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.hero h1{font-size:38px;font-weight:700;margin-bottom:12px;letter-spacing:-.5px}
+.hero .tagline{font-size:17px;opacity:.95;margin-bottom:8px}
+.hero .subtag{font-size:14px;opacity:.85;margin-bottom:28px}
+.hero .version-badge{display:inline-block;background:rgba(255,255,255,.2);padding:4px 14px;border-radius:20px;font-size:13px;margin-bottom:24px;backdrop-filter:blur(6px)}
+.cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:600;text-decoration:none;cursor:pointer;border:none;transition:all .2s}
+.btn-primary{background:#fff;color:var(--primary-d);box-shadow:0 6px 20px rgba(0,0,0,.15)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.2)}
+.btn-ghost{background:rgba(255,255,255,.15);color:#fff;border:2px solid rgba(255,255,255,.5)}
+.btn-ghost:hover{background:rgba(255,255,255,.25)}
+
+/* Section */
+.section{padding:56px 0}
+.section h2{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}
+.section .lead{text-align:center;color:var(--text3);font-size:15px;margin-bottom:40px}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}
+.feature{background:var(--card);padding:28px 24px;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s}
+.feature:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
+.feature .ico{font-size:40px;margin-bottom:14px}
+.feature h3{font-size:17px;margin-bottom:8px}
+.feature p{color:var(--text2);font-size:14px}
+
+/* Steps */
+.steps{counter-reset:step}
+.step{display:flex;gap:20px;margin-bottom:24px;align-items:flex-start}
+.step-num{flex-shrink:0;width:40px;height:40px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}
+.step-body h3{font-size:16px;margin-bottom:4px}
+.step-body p{color:var(--text2);font-size:14px}
+
+/* Highlight box */
+.highlight{background:linear-gradient(135deg,#fff7e6,#fff1f0);border-left:4px solid #ff7d00;padding:20px 24px;border-radius:8px;margin:24px 0}
+.highlight b{color:#ff7d00}
+
+/* Promo */
+.promo{background:var(--card);padding:48px 0;text-align:center}
+.promo h2{margin-bottom:8px}
+.qr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:24px;max-width:640px;margin:32px auto}
+.qr-cell{text-align:center}
+.qr-cell img{width:140px;height:140px;object-fit:cover;border-radius:10px;border:1px solid #eee;margin-bottom:8px}
+.qr-cell .qr-fallback{width:140px;height:140px;margin:0 auto 8px;border-radius:10px;border:1px dashed #ccc;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:13px;line-height:1.5}
+.qr-cell .label{font-size:13px;color:var(--text2)}
+.mascot-row{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:28px;padding:20px;background:var(--bg);border-radius:12px;max-width:560px;margin-left:auto;margin-right:auto}
+.mascot-row img{width:64px;height:64px;object-fit:contain}
+.mascot-row .text{font-size:14px;color:var(--text2);text-align:left}
+.mascot-row .text a{color:var(--primary-d)}
+
+/* Footer */
+.footer{text-align:center;padding:32px 20px;color:var(--text3);font-size:13px;border-top:1px solid #e5e6eb}
+.footer a{color:var(--primary-d);text-decoration:none}
+
+/* 更新提示条 */
+.update-bar{display:none;background:#fff7e6;color:#ff7d00;padding:10px 16px;text-align:center;font-size:14px;border-bottom:1px solid #ffe7ba}
+.update-bar.show{display:block}
+.update-bar a{color:#ff7d00;font-weight:600;text-decoration:underline}
+
+@media(max-width:600px){.hero h1{font-size:28px}.hero .logo{font-size:56px}}
+</style>
+</head>
+<body>
+
+<div id="updateBar" class="update-bar">
+  🎉 检测到本地版本不是最新，建议刷新页面 <a href="#" onclick="forceRefresh()">点此强制刷新</a>
+</div>
+
+<div class="hero">
+  <div class="container">
+    <div class="logo">🚀</div>
+    <h1>本地运行前端项目</h1>
+    <div class="tagline">一键启动任意前端项目，<b>不往项目里写任何文件</b></div>
+    <div class="subtag">替代每个项目都要重跑一次的预览脚本，团队共享、永远在线</div>
+    <div class="version-badge" id="heroVersion">📦 v0.1.0</div>
+    <div class="cta-row">
+      <a id="downloadBtn" class="btn btn-primary" href="https://github.com/lyzbcy/local-run-frontend/releases/latest">
+        🍎 下载 Mac 版
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/lyzbcy/local-run-frontend" target="_blank" rel="noopener">
+        📦 源码（GitHub）
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="container">
+    <h2>它能解决什么</h2>
+    <p class="lead">接手每一个前端项目，都要先搭一套本地预览——脚本不能 git 上去，同事用不了，下次还要重来。</p>
+    <div class="highlight">
+      <b>痛点：</b>每个项目都要重新跑一套预览工具，不能提交版本库，换个人接手就没了，浪费时间和 token。<br>
+      <b>解法：</b>装一次这个软件，统一管理所有前端项目，<b>零文件侵入</b>，团队共享，永久在线。
+    </div>
+    <div class="features" style="margin-top:32px">
+      <div class="feature">
+        <div class="ico">📂</div>
+        <h3>自动识别项目</h3>
+        <p>选目录即自动判断是静态站、Vite、Next、Vue、CRA 还是 Nuxt，给出对应启动方式。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">🚀</div>
+        <h3>一键启动</h3>
+        <p>端口自动顺延、健康检查通过才开浏览器，先打开自动生成的目录页。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">🚫</div>
+        <h3>不写任何文件</h3>
+        <p>所有预览能力都在软件内部，绝不往你的项目目录写一个文件，可以放心 git。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">🔌</div>
+        <h3>端口管理</h3>
+        <p>一目了然看到本机在跑哪些预览服务，可单独停掉，启动时自动避让占用端口。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">🤖</div>
+        <h3>AI Agent 接入</h3>
+        <p>提供本地 HTTP 接口 + Prompt，让 Cursor/Claude/ZCode 用自然语言控制启停。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">⭐</div>
+        <h3>项目记忆</h3>
+        <p>我的项目 / 收藏 / 最近，一次添加，下次直接一键打开，不用再拖目录。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="background:var(--card)">
+  <div class="container">
+    <h2>三步上手</h2>
+    <p class="lead">从安装到启动一个项目，不到一分钟</p>
+    <div class="steps" style="max-width:640px;margin:0 auto">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>下载安装</h3>
+          <p>下载 .app，拖进「应用程序」。首次打开若提示"已损坏"，运行随附的一键安装脚本即可。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>添加项目</h3>
+          <p>点「添加项目」→ 选择一个前端项目目录 → 自动识别类型 → 确认添加。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>一键启动</h3>
+          <p>点项目卡片上的「▶ 启动」，自动起服务、健康检查、打开浏览器和目录页。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="promo">
+  <div class="container">
+    <h2>💖 支持作者</h2>
+    <p class="lead">开源免费，你的支持是我持续更新的动力</p>
+    <div class="qr-grid">
+      <div class="qr-cell">
+        <img src="./assets/reward-qr.png" alt="赞赏码" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="qr-fallback" style="display:none">💝<br>赞赏码</div>
+        <div class="label">💰 请喝奶茶</div>
+      </div>
+      <div class="qr-cell">
+        <img src="./assets/sticker-qr.png" alt="表情包" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="qr-fallback" style="display:none">😺<br>表情包</div>
+        <div class="label">😺 星星布丁表情包</div>
+      </div>
+      <div class="qr-cell">
+        <img src="./assets/group-qr.png" alt="粉丝群" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="qr-fallback" style="display:none">💬<br>粉丝群</div>
+        <div class="label">💬 加入粉丝群</div>
+      </div>
+    </div>
+    <div class="mascot-row">
+      <img src="./assets/mascot.png" alt="捞鱼" onerror="this.style.display='none';">
+      <div class="text">「一个弱小但有梦想的开发者 🐟」<br><a href="https://lyzbcy.github.io/" target="_blank" rel="noopener">👉 了解捞鱼</a></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <div>由 <a href="https://lyzbcy.github.io/" target="_blank" rel="noopener">捞鱼</a> 制作 · MIT 协议开源 · <a href="https://github.com/lyzbcy/local-run-frontend" target="_blank" rel="noopener">GitHub</a></div>
+  <div style="margin-top:6px;opacity:.7" id="pageVersion">页面版本 v0.1.0</div>
+</div>
+
+<script>
+// ===== 版本号强制刷新机制 =====
+// 原理：每次改网页要更新 VERSION 常量。用户访问时拿 localStorage 里上次的版本对比，
+// 不一致就强制刷新（清缓存 reload）。同时拉 GitHub release 最新版本显示在 hero。
+// 改网页时务必同步改这里的 VERSION。
+const VERSION = '0.1.0';   // 👈 改网页时同步更新这里
+const REPO = 'lyzbcy/local-run-frontend';
+
+document.getElementById('pageVersion').textContent = '页面版本 v' + VERSION;
+
+// 1. 本地版本对比 → 强制刷新
+(function () {
+  const last = localStorage.getItem('lrf_page_version');
+  if (last && last !== VERSION) {
+    // 之前的缓存版本和当前不一致，强制清缓存刷新一次
+    localStorage.setItem('lrf_page_version', VERSION);
+    // 显示提示条
+    document.getElementById('updateBar').classList.add('show');
+    // 自动强制刷新（清缓存）
+    if (window.location.search.indexOf('fresh=1') === -1) {
+      setTimeout(function () {
+        window.location.href = window.location.pathname + '?fresh=' + VERSION;
+      }, 800);
+    }
+    return;
+  }
+  localStorage.setItem('lrf_page_version', VERSION);
+  // 如果带着 fresh 参数进来，清理掉
+  if (window.location.search.indexOf('fresh=1') !== -1 || window.location.search.indexOf('fresh=') !== -1) {
+    history.replaceState(null, '', window.location.pathname);
+  }
+})();
+
+function forceRefresh() {
+  localStorage.removeItem('lrf_page_version');
+  location.reload(true);
+}
+
+// 2. 拉 GitHub 最新 release 版本
+(async function () {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' },
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) return;
+    const j = await res.json();
+    const latest = (j.tag_name || '').replace(/^v/, '');
+    if (latest) {
+      document.getElementById('heroVersion').textContent = '📦 最新版 v' + latest;
+      const dl = document.getElementById('downloadBtn');
+      if (j.html_url) dl.href = j.html_url;
+    }
+  } catch (e) { /* 静默失败 */ }
+})();
+</script>
+</body>
+</html>
