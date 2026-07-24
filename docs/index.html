@@ -188,7 +188,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
     <p class="lead">开源免费，你的支持是我持续更新的动力</p>
     <div class="qr-grid">
       <div class="qr-cell">
-        <img src="./assets/reward-qr.png" alt="赞赏码" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <img src="./assets/reward-qr.jpg" alt="赞赏码" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
         <div class="qr-fallback" style="display:none">赞赏码</div>
         <div class="label">请作者喝杯奶茶</div>
       </div>
@@ -198,7 +198,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
         <div class="label">星星布丁表情包</div>
       </div>
       <div class="qr-cell">
-        <img src="./assets/group-qr.png" alt="粉丝群" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <img src="./assets/group-qr.jpg" alt="粉丝群" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
         <div class="qr-fallback" style="display:none">粉丝群</div>
         <div class="label">加入粉丝群</div>
       </div>
@@ -220,7 +220,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 // 原理：每次改网页要更新 VERSION 常量。用户访问时拿 localStorage 里上次的版本对比，
 // 不一致就强制刷新（清缓存 reload）。同时拉 GitHub release 最新版本显示在 hero。
 // 改网页时务必同步改这里的 VERSION。
-const VERSION = '0.1.1';   // 改网页时同步更新这里（触发用户端强制刷新）
+const VERSION = '0.1.2';   // 改网页时同步更新这里（触发用户端强制刷新）
 const REPO = 'lyzbcy/local-run-frontend';
 
 document.getElementById('pageVersion').textContent = '页面版本 v' + VERSION;
