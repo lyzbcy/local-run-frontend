@@ -132,7 +132,7 @@ async function startFramework(project, portRange, log, options = {}) {
   };
   const scheduleFlush = () => {
     if (flushTimer) return;
-    flushTimer = setTimeout(() => { flushTimer(false); }, FLUSH_MS);
+    flushTimer = setTimeout(() => { flushTimer = null; flushLogs(false); }, FLUSH_MS);
   };
   const handleChunk = (s, tag) => {
     buffer += s;
