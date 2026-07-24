@@ -175,32 +175,105 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
       res.writeHead(403); res.end('Forbidden'); return;
     }
 
-    // 无后缀 → 尝试 .html
-    if (!path.extname(filePath)) {
-      const htmlCandidate = filePath + '.html';
-      if (fs.existsSync(htmlCandidate)) filePath = htmlCandidate;
-    }
-
+    // 解析真实文件路径。先 stat，根据结果决定回退策略。
     fs.stat(filePath, (err, stats) => {
       if (!err && stats.isDirectory()) {
-        filePath = path.join(filePath, 'index.html');
+        // 目录访问：按优先级找入口文件
+        resolveDirIndex(filePath, (resolved) => {
+          if (resolved) serveFile(resolved);
+          else serveDirListing(filePath, urlPath); // 都没有 → 目录列表
+        });
+        return;
       }
-      fs.readFile(filePath, (e, content) => {
-        if (e) {
-          const code = e.code === 'ENOENT' ? 404 : 500;
-          res.writeHead(code, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end(code === 404 ? `Not Found: ${urlPath}` : 'Server Error');
-          log(`[${code}] ${urlPath}`);
-          return;
-        }
-        const ext = path.extname(filePath).toLowerCase();
+
+      // 不是目录（文件或不存在）
+      if (!err && stats.isFile()) return serveFile(filePath);
+
+      // 不存在 → 无后缀时尝试补 .html，再试当目录
+      if (!path.extname(filePath)) {
+        const htmlCandidate = filePath + '.html';
+        if (fs.existsSync(htmlCandidate)) return serveFile(htmlCandidate);
+        // 也许是没带斜杠的目录（如 /casePage）
+        fs.stat(filePath, (e2, s2) => {
+          if (!e2 && s2.isDirectory()) {
+            resolveDirIndex(filePath, (resolved) => {
+              if (resolved) serveFile(resolved);
+              else serveDirListing(filePath, urlPath);
+            });
+            return;
+          }
+          notFound();
+        });
+        return;
+      }
+      notFound();
+    });
+
+    // --- 辅助：目录入口解析。index.html → index.htm → 唯一 html ---
+    function resolveDirIndex(dirPath, cb) {
+      const candidates = ['index.html', 'index.htm', 'default.html'];
+      for (const c of candidates) {
+        const full = path.join(dirPath, c);
+        if (fs.existsSync(full)) return cb(full);
+      }
+      // 该目录是否只有一个 html 文件？若是，直接用它当入口
+      try {
+        const htmls = fs.readdirSync(dirPath).filter(f => f.endsWith('.html') || f.endsWith('.htm'));
+        if (htmls.length === 1) return cb(path.join(dirPath, htmls[0]));
+      } catch {}
+      cb(null);
+    }
+
+    // --- 辅助：目录列表（类 nginx autoindex）---
+    function serveDirListing(dirPath, reqPath) {
+      let entries;
+      try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); }
+      catch { return notFound(); }
+      // 确保路径以 / 结尾，方便拼链接
+      const base = reqPath.endsWith('/') ? reqPath : reqPath + '/';
+      const items = entries
+        .filter(e => !e.name.startsWith('.'))
+        .sort((a, b) => {
+          if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        })
+        .map(e => {
+          const slash = e.isDirectory() ? '/' : '';
+          const ico = e.isDirectory() ? '📁' : (e.name.endsWith('.html') ? '📄' : '📦');
+          return `<li><a href="${base}${encodeURIComponent(e.name)}${slash}">${ico} ${escapeHtml(e.name)}${slash}</a></li>`;
+        }).join('');
+      const parent = reqPath !== '/' ? `<li><a href="${base}..">📁 ..</a></li>` : '';
+      const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(projectName)} · ${escapeHtml(reqPath)}</title>
+<style>body{font-family:-apple-system,"PingFang SC",sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1d2129}
+h1{font-size:18px;font-weight:600}ul{list-style:none;padding:0}li{padding:8px 12px;border-bottom:1px solid #f0f1f3}
+a{color:#409eff;text-decoration:none}a:hover{text-decoration:underline}.path{color:#86909c;font-size:13px;font-family:monospace}
+.ft{margin-top:24px;color:#c9cdd4;font-size:12px;text-align:center}</style></head>
+<body><h1>${escapeHtml(projectName)}</h1><div class="path">${escapeHtml(reqPath)}</div><ul>${parent}${items || '<li>空目录</li>'}</ul>
+<div class="ft">由 本地运行前端项目 生成</div></body></html>`;
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.end(html);
+      log(`[200/dir] ${reqPath}`);
+    }
+
+    function serveFile(fp) {
+      fs.readFile(fp, (e, content) => {
+        if (e) return notFound();
+        const ext = path.extname(fp).toLowerCase();
         res.writeHead(200, {
           'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
           'Cache-Control': 'no-cache'
         });
         res.end(content);
       });
-    });
+    }
+
+    function notFound() {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`Not Found: ${urlPath}`);
+      log(`[404] ${urlPath}`);
+    }
   });
 
   return new Promise((resolve, reject) => {
