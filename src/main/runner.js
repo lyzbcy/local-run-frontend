@@ -8,12 +8,15 @@ const { createDevNavServer } = require('./dev-nav');
 
 const instances = new Map();
 
+// 探测端口是否空闲。
+// 关键：必须用 0.0.0.0（IPv4 any）探测——它能同时发现 IPv4-only 占用、IPv6 dual-stack 占用
+// （vite 绑 :: 时 dual-stack 会接管 IPv4）、以及 IPv6-only 占用。用 127.0.0.1 或 ::1 都会漏判。
 function isPortFree(port) {
   return new Promise(resolve => {
     const srv = net.createServer();
     srv.once('error', () => resolve(false));
     srv.once('listening', () => srv.close(() => resolve(true)));
-    srv.listen(port, '127.0.0.1');
+    srv.listen(port, '0.0.0.0');
   });
 }
 
@@ -45,36 +48,32 @@ async function waitHealthy(url, { timeout = 60000, interval = 1000, log }) {
 }
 
 // 启动静态项目的内嵌预览 server。
-// 不再用 findFreePort 预探测（net.createServer 探测法不可靠，vite 子进程占的端口可能探不到），
-// 改成直接尝试 listen，EADDRINUSE 就顺延重试——以真实 bind 结果为准。
+// 启动静态项目的内嵌预览 server。
+// findFreePort 已同时检查 IPv4+IPv6（vite 只绑 IPv6 的坑已堵），用它预选空闲端口；
+// 万一预选后 listen 仍 EADDRINUSE（竞态），顺延重试。
 async function startStatic(project, portRange, log) {
-  let startPort = portRange[0];
-  if (project.port && project.port >= portRange[0] && project.port <= portRange[1]) startPort = project.port;
+  let port = await findFreePort(portRange[0], portRange[1], project.port);
   let lastErr = null;
-  for (let port = startPort; port <= portRange[1]; port++) {
+  for (let attempt = port; attempt <= portRange[1]; attempt = await findFreePort(attempt + 1, portRange[1])) {
     try {
       const { server, baseUrl } = await createPreviewServer({
-        root: project.path,
-        projectName: project.name,
-        port,
-        routeAliases: project.routeAliases || {},
-        onLog: log
+        root: project.path, projectName: project.name, port: attempt,
+        routeAliases: project.routeAliases || {}, onLog: log
       });
       const navUrl = `${baseUrl}/__nav__`;
       const homeUrl = `${baseUrl}/`;
       await waitHealthy(homeUrl, { timeout: 15000, log });
-      return { kind: 'static', server, proc: null, port, baseUrl, homeUrl, navUrl, startedAt: Date.now() };
+      return { kind: 'static', server, proc: null, port: attempt, baseUrl, homeUrl, navUrl, startedAt: Date.now() };
     } catch (e) {
       lastErr = e;
-      // 端口被占 → 顺延；其他错误（如健康检查超时）也试下一个端口，但记录
       if (e && (e.code === 'EADDRINUSE' || /EADDRINUSE/.test(e.message))) {
-        log(`端口 ${port} 被占用，顺延到 ${port + 1}`);
+        log(`端口 ${attempt} 被占用（竞态），顺延`);
         continue;
       }
       throw e;
     }
   }
-  throw new Error(`端口区间 ${startPort}-${portRange[1]} 全部启动失败：${lastErr ? lastErr.message : '未知'}`);
+  throw new Error(`端口启动失败：${lastErr ? lastErr.message : '未知'}`);
 }
 
 // 把用户配置的启动命令 + 指定端口，拼成正确的参数数组。
