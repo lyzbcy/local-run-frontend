@@ -1,6 +1,6 @@
 {
   "name": "local-run-frontend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "本地运行前端项目 - 一键启动任意前端项目的桌面工具",
   "private": true,
   "main": "src/main/main.js",
