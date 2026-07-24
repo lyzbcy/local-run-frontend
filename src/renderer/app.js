@@ -98,6 +98,15 @@ function bindToolbar() {
   $('#btnPortsRefresh').addEventListener('click', () => renderPorts());
   $('#btnAbout').addEventListener('click', () => $('#aboutModal').style.display = 'flex');
   $('#btnLogsClear').addEventListener('click', async () => { await window.api.clearLogs(); renderLogs(); });
+  $('#btnLogsCopy').addEventListener('click', async () => {
+    const logs = await window.api.getLogs();
+    if (!logs || !logs.length) { toast('没有日志可复制'); return; }
+    const text = logs.map(l => {
+      const time = new Date(l.t).toLocaleTimeString('zh-CN', { hour12: false });
+      return `[${time}] [${(l.level || 'info').toUpperCase()}] ${l.msg}`;
+    }).join('\n');
+    navigator.clipboard.writeText(text).then(() => toast('已复制 ' + logs.length + ' 条日志', 'success'));
+  });
   // empty state / modal close buttons
   $('#btnEmptyAdd').addEventListener('click', openAddModal);
   $('#btnAboutClose').addEventListener('click', () => $('#aboutModal').style.display = 'none');

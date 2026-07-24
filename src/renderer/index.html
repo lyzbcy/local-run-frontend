@@ -100,7 +100,10 @@ POST /stop    {"id"}  关闭项目</pre>
           <div class="panel">
             <div class="panel-head">
               <div class="panel-title"><img src="../assets/sticker/work.png" class="panel-sticker" alt=""> 运行日志</div>
-              <button id="btnLogsClear" class="ghost-btn">清空</button>
+              <div style="display:flex;gap:8px;">
+                <button id="btnLogsCopy" class="ghost-btn">复制全部</button>
+                <button id="btnLogsClear" class="ghost-btn">清空</button>
+              </div>
             </div>
             <div class="panel-desc">最近 50 条操作日志（只存内存，不写磁盘）。开发测试用。</div>
             <div id="logsBox" class="logs-box"></div>
