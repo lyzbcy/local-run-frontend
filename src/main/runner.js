@@ -4,6 +4,7 @@
 const net = require('net');
 const { spawn } = require('child_process');
 const { createPreviewServer, scanHtmlFiles } = require('./preview-server');
+const { createDevNavServer } = require('./dev-nav');
 
 const instances = new Map();
 
@@ -107,18 +108,51 @@ async function startFramework(project, portRange, log) {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  // 边收集输出边尝试抓真实端口
+  // 边收集输出边尝试抓真实端口。输出节流 + 噪音折叠，避免 IPC 洪泛（qv-admin 启动吐上百行 sass 警告会卡死渲染层）。
   let realPort = null;
   let buffer = '';
+  let pendingLogs = '';
+  let flushTimer = null;
+  let noiseCount = 0; // 折叠掉重复的噪音警告
+
+  const FLUSH_MS = 200;
+  const FLUSH_MAX = 2000; // 攒到这个量也立即 flush
+  const NOISE_RE = /DEPRECATION WARNING|@charset must precede|mixed-decls|repetitive deprecation|postcss|glob option "as"|Failed to run dependency scan/i;
+
+  const flushLogs = (force) => {
+    if (!pendingLogs && !noiseCount) return;
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    let out = pendingLogs;
+    if (noiseCount) out += (out ? '\n' : '') + `[dev] (已折叠 ${noiseCount} 条噪音警告：sass/postcss/deprecation 等)`;
+    if (out) log(out);
+    pendingLogs = '';
+    noiseCount = 0;
+  };
+  const scheduleFlush = () => {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => { flushTimer(false); }, FLUSH_MS);
+  };
+  const handleChunk = (s, tag) => {
+    buffer += s;
+    tryExtract();
+    // 按行分类：噪音折叠，正常行累积
+    for (const line of s.split(/\r?\n/)) {
+      if (!line) continue;
+      if (NOISE_RE.test(line)) { noiseCount++; continue; }
+      pendingLogs += (pendingLogs ? '\n' : '') + `[${tag}] ${line}`;
+      if (pendingLogs.length >= FLUSH_MAX) flushLogs(false);
+    }
+    scheduleFlush();
+  };
   const tryExtract = () => {
     if (!realPort) {
       const p = extractPortFromOutput(buffer);
       if (p) { realPort = p; log(`检测到 dev server 端口：${realPort}`); }
     }
   };
-  proc.stdout.on('data', d => { const s = d.toString(); buffer += s; log(`[dev] ${s.trimEnd()}`); tryExtract(); });
-  proc.stderr.on('data', d => { const s = d.toString(); buffer += s; log(`[dev!] ${s.trimEnd()}`); tryExtract(); });
-  proc.on('exit', code => log(`[dev] 进程退出 code=${code}`));
+  proc.stdout.on('data', d => handleChunk(d.toString(), 'dev'));
+  proc.stderr.on('data', d => handleChunk(d.toString(), 'dev!'));
+  proc.on('exit', code => { flushLogs(true); log(`[dev] 进程退出 code=${code}`); });
 
   // 等真实端口出现（dev server 会打印），最长 90s
   const deadline = Date.now() + 90000;
@@ -129,13 +163,25 @@ async function startFramework(project, portRange, log) {
   // 端口确认：抓到用抓到的，否则退回期望端口（健康检查兜底）
   const port = realPort ? parseInt(realPort, 10) : preferPort;
   const homeUrl = `http://127.0.0.1:${port}/`;
+  flushLogs(true);
   log(`健康检查：${homeUrl}`);
   await waitHealthy(homeUrl, { timeout: 60000, log });
+  flushLogs(true);
 
   const baseUrl = `http://127.0.0.1:${port}`;
+  // 框架项目：额外起一个开发导航 server（扫 src/router），让目录页能点进各路由
+  let navServer = null;
+  let navUrl = homeUrl;
+  try {
+    navServer = await createDevNavServer({
+      projectRoot: project.path, projectName: project.name, devBaseUrl: baseUrl, onLog: log
+    });
+    navUrl = navServer.navUrl;
+  } catch (e) { log(`[nav] 启动失败（忽略，降级为首页）：${e.message}`); }
+
   return {
-    kind: 'framework', server: null, proc, port, baseUrl,
-    homeUrl, navUrl: homeUrl, startedAt: Date.now()
+    kind: 'framework', server: navServer ? navServer.server : null, proc, port, baseUrl,
+    homeUrl, navUrl, startedAt: Date.now()
   };
 }
 
