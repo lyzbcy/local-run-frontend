@@ -43,16 +43,23 @@ input, textarea, pre.selectable { user-select: text; -webkit-user-select: text; 
   border-bottom: 1px solid var(--border-soft);
 }
 .drag-region { display: flex; align-items: center; gap: 10px; -webkit-app-region: drag; flex: 1; }
-.logo { font-size: 22px; }
+.logo { width: 28px; height: 28px; }
+.logo img { width: 100%; height: 100%; object-fit: contain; }
 .title { font-weight: 600; font-size: 15px; }
 .title .ver { font-size: 11px; color: var(--text-3); font-weight: 400; margin-left: 6px;
   background: var(--bg); padding: 2px 8px; border-radius: 8px; }
 .titlebar-actions { display: flex; gap: 6px; -webkit-app-region: no-drag; }
 .icon-btn {
-  width: 32px; height: 32px; border: none; background: transparent; border-radius: var(--radius-sm);
-  cursor: pointer; font-size: 16px; transition: background .15s;
+  width: 36px; height: 36px; border: none; background: transparent; border-radius: var(--radius-sm);
+  cursor: pointer; transition: background .15s; padding: 4px; display: flex; align-items: center; justify-content: center;
 }
+.icon-btn img { width: 100%; height: 100%; object-fit: contain; }
 .icon-btn:hover { background: var(--bg); }
+
+/* 贴纸通用样式 */
+.nav-sticker { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+.panel-sticker { width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; object-fit: contain; }
+.btn-sticker { width: 18px; height: 18px; vertical-align: middle; margin-right: 2px; object-fit: contain; }
 
 /* 布局 */
 .layout { flex: 1; display: flex; min-height: 0; }
@@ -111,7 +118,8 @@ input, textarea, pre.selectable { user-select: text; -webkit-user-select: text; 
 .card:hover { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
 .card.running { border-color: var(--success); }
 .card-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
-.card-icon { font-size: 22px; line-height: 1; }
+.card-icon { width: 36px; height: 36px; line-height: 1; flex-shrink: 0; }
+.card-icon img { width: 100%; height: 100%; object-fit: contain; }
 .card-main { flex: 1; min-width: 0; }
 .card-name { font-weight: 600; font-size: 15px; word-break: break-all; }
 .card-path { font-size: 11px; color: var(--text-3); word-break: break-all; margin-top: 2px;
@@ -124,19 +132,26 @@ input, textarea, pre.selectable { user-select: text; -webkit-user-select: text; 
 .tag.type-static { background: #e8ffea; color: var(--success); }
 .tag.type-framework { background: var(--primary-bg); color: var(--primary-d); }
 .tag.type-unknown { background: var(--warn-bg); color: var(--warn); }
-.tag.running { background: var(--success-bg); color: var(--success); }
+.tag.running { background: var(--success-bg); color: var(--success); display: inline-flex; align-items: center; gap: 4px; }
+.tag.running::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 1.4s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.primary-btn.stop { background: var(--warn); }
+.primary-btn.stop:hover:not(:disabled) { background: #ec6a00; }
 .card-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .card-actions button, .card-actions a { padding: 6px 12px; font-size: 12px; }
 .card-actions .mini-btn {
-  width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); background: var(--bg-elev);
-  border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; transition: all .15s;
+  height: 28px; min-width: 28px; padding: 3px 8px; border: 1px solid var(--border); background: var(--bg-elev);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; transition: all .15s;
+  display: flex; align-items: center; justify-content: center;
 }
+.card-actions .mini-btn img { width: 18px; height: 18px; object-fit: contain; }
 .card-actions .mini-btn:hover { border-color: var(--primary); }
 .card-actions .mini-btn.active { background: var(--warn-bg); border-color: var(--warn); }
 
 /* 空状态 */
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-3); }
-.empty-emoji { font-size: 56px; margin-bottom: 16px; }
+.empty-emoji { width: 80px; height: 80px; margin: 0 auto 16px; }
+.empty-emoji img { width: 100%; height: 100%; object-fit: contain; }
 .empty-title { font-size: 18px; color: var(--text-2); font-weight: 500; margin-bottom: 8px; }
 .empty-desc { line-height: 1.8; margin-bottom: 12px; }
 .empty-desc b { color: var(--primary-d); }
