@@ -6,7 +6,7 @@
 <!-- CSP：允许内联脚本（版本检查需要）+ 加载本地图片 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob: https:; connect-src 'self' https://api.github.com;">
 <title>本地运行前端项目 · 一键启动任意前端项目</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+<link rel="icon" href="./assets/sticker/work.png">
 <style>
 :root {
   --bg:#f5f7fa;--card:#fff;--text:#1d2129;--text2:#4e5969;--text3:#86909c;
@@ -19,7 +19,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 
 /* Hero */
 .hero{background:linear-gradient(135deg,#409eff 0%,#36cfc9 100%);color:#fff;padding:70px 0 60px;text-align:center}
-.hero .logo{font-size:72px;margin-bottom:12px;animation:float 3s ease-in-out infinite}
+.hero .logo{width:140px;height:140px;margin:0 auto 12px;animation:float 3s ease-in-out infinite;
+  filter:drop-shadow(0 8px 20px rgba(0,0,0,.25))}
+.hero .logo img{width:100%;height:100%;object-fit:contain}
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 .hero h1{font-size:38px;font-weight:700;margin-bottom:12px;letter-spacing:-.5px}
 .hero .tagline{font-size:17px;opacity:.95;margin-bottom:8px}
@@ -29,6 +31,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:600;text-decoration:none;cursor:pointer;border:none;transition:all .2s}
 .btn-primary{background:#fff;color:var(--primary-d);box-shadow:0 6px 20px rgba(0,0,0,.15)}
 .btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.2)}
+.btn-sticker{width:24px;height:24px;vertical-align:middle}
 .btn-ghost{background:rgba(255,255,255,.15);color:#fff;border:2px solid rgba(255,255,255,.5)}
 .btn-ghost:hover{background:rgba(255,255,255,.25)}
 
@@ -37,9 +40,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .section h2{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}
 .section .lead{text-align:center;color:var(--text3);font-size:15px;margin-bottom:40px}
 .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}
-.feature{background:var(--card);padding:28px 24px;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s}
+.feature{background:var(--card);padding:32px 24px 28px;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s;text-align:center}
 .feature:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
-.feature .ico{font-size:40px;margin-bottom:14px}
+.feature .ico{width:64px;height:64px;margin:0 auto 14px}
+.feature .ico img{width:100%;height:100%;object-fit:contain;transition:transform .25s}
+.feature:hover .ico img{transform:scale(1.1) rotate(-3deg)}
 .feature h3{font-size:17px;margin-bottom:8px}
 .feature p{color:var(--text2);font-size:14px}
 
@@ -55,6 +60,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .highlight b{color:#ff7d00}
 
 /* Promo */
+.inline-sticker{width:40px;height:40px;vertical-align:middle;margin-right:6px}
 .promo{background:var(--card);padding:48px 0;text-align:center}
 .promo h2{margin-bottom:8px}
 .qr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:24px;max-width:640px;margin:32px auto}
@@ -87,14 +93,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 
 <div class="hero">
   <div class="container">
-    <div class="logo">🚀</div>
+    <div class="logo"><img src="./assets/sticker/mascot.png" alt="本地运行前端项目吉祥物"></div>
     <h1>本地运行前端项目</h1>
     <div class="tagline">一键启动任意前端项目，<b>不往项目里写任何文件</b></div>
     <div class="subtag">替代每个项目都要重跑一次的预览脚本，团队共享、永远在线</div>
     <div class="version-badge" id="heroVersion">📦 v0.1.0</div>
     <div class="cta-row">
       <a id="downloadBtn" class="btn btn-primary" href="https://github.com/lyzbcy/local-run-frontend/releases/latest">
-        🍎 下载 Mac 版
+        <img src="./assets/sticker/go.png" alt="" class="btn-sticker"> 下载 Mac 版
       </a>
       <a class="btn btn-ghost" href="https://github.com/lyzbcy/local-run-frontend" target="_blank" rel="noopener">
         📦 源码（GitHub）
@@ -113,32 +119,32 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
     </div>
     <div class="features" style="margin-top:32px">
       <div class="feature">
-        <div class="ico">📂</div>
+        <div class="ico"><img src="./assets/sticker/hello.png" alt=""></div>
         <h3>自动识别项目</h3>
         <p>选目录即自动判断是静态站、Vite、Next、Vue、CRA 还是 Nuxt，给出对应启动方式。</p>
       </div>
       <div class="feature">
-        <div class="ico">🚀</div>
+        <div class="ico"><img src="./assets/sticker/go.png" alt=""></div>
         <h3>一键启动</h3>
         <p>端口自动顺延、健康检查通过才开浏览器，先打开自动生成的目录页。</p>
       </div>
       <div class="feature">
-        <div class="ico">🚫</div>
+        <div class="ico"><img src="./assets/sticker/pat.png" alt=""></div>
         <h3>不写任何文件</h3>
         <p>所有预览能力都在软件内部，绝不往你的项目目录写一个文件，可以放心 git。</p>
       </div>
       <div class="feature">
-        <div class="ico">🔌</div>
+        <div class="ico"><img src="./assets/sticker/watch.png" alt=""></div>
         <h3>端口管理</h3>
         <p>一目了然看到本机在跑哪些预览服务，可单独停掉，启动时自动避让占用端口。</p>
       </div>
       <div class="feature">
-        <div class="ico">🤖</div>
+        <div class="ico"><img src="./assets/sticker/smart.png" alt=""></div>
         <h3>AI Agent 接入</h3>
         <p>提供本地 HTTP 接口 + Prompt，让 Cursor/Claude/ZCode 用自然语言控制启停。</p>
       </div>
       <div class="feature">
-        <div class="ico">⭐</div>
+        <div class="ico"><img src="./assets/sticker/love.png" alt=""></div>
         <h3>项目记忆</h3>
         <p>我的项目 / 收藏 / 最近，一次添加，下次直接一键打开，不用再拖目录。</p>
       </div>
@@ -169,7 +175,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
         <div class="step-num">3</div>
         <div class="step-body">
           <h3>一键启动</h3>
-          <p>点项目卡片上的「▶ 启动」，自动起服务、健康检查、打开浏览器和目录页。</p>
+          <p>点项目卡片上的「启动」，自动起服务、健康检查、打开浏览器和目录页。</p>
         </div>
       </div>
     </div>
@@ -178,28 +184,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 
 <div class="promo">
   <div class="container">
-    <h2>💖 支持作者</h2>
+    <h2><img src="./assets/sticker/pat.png" alt="" class="inline-sticker"> 支持作者</h2>
     <p class="lead">开源免费，你的支持是我持续更新的动力</p>
     <div class="qr-grid">
       <div class="qr-cell">
         <img src="./assets/reward-qr.png" alt="赞赏码" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-        <div class="qr-fallback" style="display:none">💝<br>赞赏码</div>
-        <div class="label">💰 请喝奶茶</div>
+        <div class="qr-fallback" style="display:none">赞赏码</div>
+        <div class="label">请作者喝杯奶茶</div>
       </div>
       <div class="qr-cell">
         <img src="./assets/sticker-qr.png" alt="表情包" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-        <div class="qr-fallback" style="display:none">😺<br>表情包</div>
-        <div class="label">😺 星星布丁表情包</div>
+        <div class="qr-fallback" style="display:none">表情包</div>
+        <div class="label">星星布丁表情包</div>
       </div>
       <div class="qr-cell">
         <img src="./assets/group-qr.png" alt="粉丝群" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-        <div class="qr-fallback" style="display:none">💬<br>粉丝群</div>
-        <div class="label">💬 加入粉丝群</div>
+        <div class="qr-fallback" style="display:none">粉丝群</div>
+        <div class="label">加入粉丝群</div>
       </div>
     </div>
     <div class="mascot-row">
-      <img src="./assets/mascot.png" alt="捞鱼" onerror="this.style.display='none';">
-      <div class="text">「一个弱小但有梦想的开发者 🐟」<br><a href="https://lyzbcy.github.io/" target="_blank" rel="noopener">👉 了解捞鱼</a></div>
+      <img src="./assets/sticker/mascot.png" alt="捞鱼" class="mascot">
+      <div class="text">「一个弱小但有梦想的开发者」<br><a href="https://lyzbcy.github.io/" target="_blank" rel="noopener">了解捞鱼 →</a></div>
     </div>
   </div>
 </div>
