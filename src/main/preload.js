@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   // 目录选择 + 探测
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
+  detectPath: (p) => ipcRenderer.invoke('project:detectPath', p),
   detect: (projectPath) => ipcRenderer.invoke('project:detect', projectPath),
 
   // store
@@ -13,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   // 项目
   addProject: (payload) => ipcRenderer.invoke('project:add', payload),
   updateProject: (payload) => ipcRenderer.invoke('project:update', payload),
+  redetectProject: (id) => ipcRenderer.invoke('project:redetect', { id }),
   removeProject: (payload) => ipcRenderer.invoke('project:remove', payload),
   revealProject: (projectPath) => ipcRenderer.invoke('project:reveal', { projectPath }),
 
@@ -23,11 +25,16 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', { url }),
 
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
+  performUpdate: () => ipcRenderer.invoke('app:performUpdate'),
+  removeQuarantine: () => ipcRenderer.invoke('app:removeQuarantine'),
   appVersion: () => ipcRenderer.invoke('app:version'),
 
   // 日志系统
   getLogs: () => ipcRenderer.invoke('logs:get'),
   clearLogs: () => ipcRenderer.invoke('logs:clear'),
+  ctrlStatus: () => ipcRenderer.invoke('ctrl:status'),
+  saveSettings: (settings) => ipcRenderer.invoke('settings:save', { settings }),
+  importData: (projects) => ipcRenderer.invoke('data:import', { projects }),
 
   // 事件
   onProjectLog: (cb) => {
@@ -39,6 +46,16 @@ contextBridge.exposeInMainWorld('api', {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('app:updateAvailable', h);
     return () => ipcRenderer.removeListener('app:updateAvailable', h);
+  },
+  onUpdateProgress: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('update:progress', h);
+    return () => ipcRenderer.removeListener('update:progress', h);
+  },
+  onQuarantineDetected: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('app:quarantineDetected', h);
+    return () => ipcRenderer.removeListener('app:quarantineDetected', h);
   },
   onCtrlLog: (cb) => {
     const h = (_e, msg) => cb(msg);

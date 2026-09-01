@@ -5,6 +5,8 @@ const net = require('net');
 const { spawn } = require('child_process');
 const { createPreviewServer, scanHtmlFiles } = require('./preview-server');
 const { createDevNavServer } = require('./dev-nav');
+const { checkProjectBackends } = require('./backend-probe');
+const { detectNode } = require('./detect-node');
 
 const instances = new Map();
 
@@ -105,12 +107,21 @@ async function startFramework(project, portRange, log, options = {}) {
   const args = buildFrameworkArgs(cmd, preferPort);
   log(`启动命令：${bin} ${args.join(' ')}`);
 
-  const env = {
-    ...process.env,
-    ELECTRON_RUN_AS_NODE: undefined
-  };
+  const env = { ...process.env };
+  // 删除 ELECTRON_RUN_AS_NODE（防子进程被当成 node 跑，导致 vite 等 CLI 行为异常）
+  delete env.ELECTRON_RUN_AS_NODE;
   // 拼 PATH：.app 双击时默认 PATH 极短，不含 nvm/volta。把探测到的 node binDir 放最前。
+  // 关键兜底：调用方（如控制接口 /start）没传 nodeBinDir 时，这里自己探测——
+  // 否则 PATH 里没有 npm，spawn 秒退，健康检查超时（真实踩坑：HTTP 接口启动失败而 UI 启动正常）。
   const extraPaths = [];
+  if (!options.nodeBinDir) {
+    const node = detectNode();
+    if (!node) {
+      throw new Error('未检测到系统 Node.js。框架项目（vite/next 等）需要本机安装 Node.js 才能启动。请到 https://nodejs.org 安装后重试。');
+    }
+    log(`[node] 自动探测：${node.version || '(版本未知)'} @ ${node.path}`);
+    options = { ...options, nodeBinDir: node.binDir };
+  }
   if (options.nodeBinDir) extraPaths.push(options.nodeBinDir);
   if (process.platform === 'darwin') extraPaths.push('/opt/homebrew/bin', '/usr/local/bin');
   if (extraPaths.length) env.PATH = [...extraPaths, env.PATH || ''].join(':');
@@ -119,6 +130,7 @@ async function startFramework(project, portRange, log, options = {}) {
     cwd: project.path,
     env,
     shell: true,
+    detached: true, // 关键：让子进程独立成进程组，这样能 kill 整组（防孙进程孤儿）
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -188,14 +200,25 @@ async function startFramework(project, portRange, log, options = {}) {
   let navUrl = homeUrl;
   try {
     navServer = await createDevNavServer({
-      projectRoot: project.path, projectName: project.name, devBaseUrl: baseUrl, onLog: log
+      projectRoot: project.path, projectName: project.name, devBaseUrl: baseUrl, onLog: log,
+      tokenConfig: project.tokenConfig || null,
+      onSaveConfig: options.onSaveConfig // main 提供，写回 store
     });
     navUrl = navServer.navUrl;
   } catch (e) { log(`[nav] 启动失败（忽略，降级为首页）：${e.message}`); }
 
+  // 后端依赖探测：dev server 活着 ≠ 项目可用。proxy 目标挂了页面会白屏/登录失败，
+  // 健康检查看不见，这里显式探测并警告（不阻止启动）。
+  let backendWarnings = [];
+  try {
+    const results = await checkProjectBackends(project.path, log);
+    backendWarnings = results.filter(r => !r.ok).map(r =>
+      `后端不可达 ${r.target}（${r.detail}，来自${r.source}）：页面能打开但接口会失败。请启动本地后端，或在 .env.development.local 里把代理目标指到可用环境`);
+  } catch {}
+
   return {
     kind: 'framework', server: navServer ? navServer.server : null, proc, port, baseUrl,
-    homeUrl, navUrl, startedAt: Date.now()
+    homeUrl, navUrl, startedAt: Date.now(), backendWarnings
   };
 }
 
@@ -223,12 +246,19 @@ function stopProject(projectId, log = () => {}) {
       try { inst.server.close(); } catch {}
     }
     if (inst.proc && !inst.proc.killed) {
-      inst.proc.kill('SIGTERM');
-      // 兜底强杀
+      // 用进程组 kill：detached 启动的子进程是独立的进程组，kill(-pid) 杀整组
+      // 这能杀掉 shell 启动的 dev server 孙进程，防端口被占（vite/next 的常见坑）
+      try { process.kill(-inst.proc.pid, 'SIGTERM'); }
+      catch {
+        // 进程组 kill 失败（可能不是组长），退回普通 kill
+        try { inst.proc.kill('SIGTERM'); } catch {}
+      }
+      // 兜底强杀整组
       setTimeout(() => {
-        try {
-          if (inst.proc && !inst.proc.killed) inst.proc.kill('SIGKILL');
-        } catch {}
+        try { process.kill(-inst.proc.pid, 'SIGKILL'); }
+        catch {
+          try { if (inst.proc && !inst.proc.killed) inst.proc.kill('SIGKILL'); } catch {}
+        }
       }, 1500);
     }
   } catch (e) {
@@ -248,7 +278,8 @@ function getStatus() {
       baseUrl: inst.baseUrl,
       homeUrl: inst.homeUrl,
       navUrl: inst.navUrl,
-      startedAt: inst.startedAt
+      startedAt: inst.startedAt,
+      backendWarnings: inst.backendWarnings || []
     });
   }
   return out;

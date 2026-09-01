@@ -3,13 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- CSP：允许加载本地 css/js，禁止远程脚本 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:* http://localhost:* https://api.github.com;">
+  <!-- CSP：允许加载本地 css/js，inline 脚本用于图片 onerror 兜底；禁止远程脚本 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:* http://localhost:* https://api.github.com;">
   <title>本地运行前端项目</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="app">
+    <!-- quarantine 引导条（首次打开被 Gatekeeper 拦时显示） -->
+    <div id="quarantineBar" class="quarantine-bar" style="display:none">
+      <span>检测到 macOS 隔离标记，可能导致后续打开提示「已损坏」。点此一键去除（需授权一次）。</span>
+      <button id="btnRemoveQuarantine" class="primary-btn" style="padding:5px 12px;font-size:12px;">一键去除</button>
+      <button id="btnQuarantineDismiss" class="card-error-close" style="color:#fff">×</button>
+    </div>
     <!-- 标题栏（mac 自定义红绿灯留位） -->
     <header class="titlebar">
       <div class="drag-region">
@@ -17,7 +23,7 @@
         <div class="title">本地运行前端项目 <span id="version" class="ver"></span></div>
       </div>
       <div class="titlebar-actions">
-        <button id="btnAbout" class="icon-btn" title="关于 / 推广"><img src="../assets/sticker/pat.png" alt=""></button>
+        <button id="btnAbout" class="about-btn" title="关于 / 推广"><img src="../assets/sticker/pat.png" alt=""> 关于</button>
       </div>
     </header>
 
@@ -31,6 +37,7 @@
           <button class="nav-item" data-view="ports"><img src="../assets/sticker/watch.png" class="nav-sticker" alt=""> <span>网关端口</span></button>
           <button class="nav-item" data-view="agent"><img src="../assets/sticker/smart.png" class="nav-sticker" alt=""> <span>AI Agent</span></button>
           <button class="nav-item" data-view="logs"><img src="../assets/sticker/work.png" class="nav-sticker" alt=""> <span>日志</span></button>
+          <button class="nav-item" data-view="settings"><img src="../assets/sticker/ready.png" class="nav-sticker" alt=""> <span>设置</span></button>
         </nav>
         <div class="sidebar-footer">
           <div class="hint">不写文件到你的项目</div>
@@ -53,7 +60,7 @@
           <div id="projectGrid" class="project-grid"></div>
           <div id="emptyState" class="empty-state" style="display:none">
             <div class="empty-emoji"><img src="../assets/sticker/expect.png" alt=""></div>
-            <div class="empty-title">还没有项目</div>
+            <div class="empty-title" id="emptyTitle">还没有项目</div>
             <div class="empty-desc">点击右上角「添加项目」，选择一个前端项目目录<br>我们会自动识别类型，一键启动，<b>不往项目里写任何文件</b>。</div>
             <button class="primary-btn big" id="btnEmptyAdd"><img src="../assets/sticker/go.png" class="btn-sticker" alt=""> 添加第一个项目</button>
           </div>
@@ -77,15 +84,20 @@
             <div class="panel-title"><img src="../assets/sticker/smart.png" class="panel-sticker" alt=""> AI-Agent 接入</div>
             <div class="panel-desc">让你的 AI Agent（Cursor / Claude / ZCode 等）通过下面的本地 HTTP 接口控制本软件，实现「用自然语言启动/关闭前端项目」。</div>
             <div class="agent-block">
-              <div class="agent-label">控制接口地址（POST/GET · 仅本机）</div>
+              <div class="agent-label">控制接口地址（POST/GET · 仅本机）<span id="ctrlStatusBadge" class="ctrl-badge">检查中…</span></div>
               <div class="code-block">http://127.0.0.1:47800</div>
+              <div id="ctrlErrorHint" class="ctrl-error" style="display:none"></div>
+              <button id="btnTestCtrl" class="ghost-btn" style="margin-top:8px;">测试连接</button>
             </div>
             <div class="agent-block">
               <div class="agent-label">可用端点</div>
-              <pre class="code-block small">GET  /status          运行中的实例
-GET  /projects        项目列表
-POST /start   {"id"}  启动项目（自动开浏览器 + 目录页）
-POST /stop    {"id"}  关闭项目</pre>
+              <pre class="code-block small">GET  /status              运行中的实例
+GET  /projects            项目列表
+POST /start   {"id"}      启动项目（自动开浏览器 + 目录页）
+POST /stop    {"id"}      关闭项目
+POST /restart {"id"}      重启项目（改了代码用这个）
+POST /add     {"path"}    添加项目（自动探测类型）
+POST /remove  {"id"}      删除项目（仅从列表删，不删文件）</pre>
             </div>
             <div class="agent-block">
               <div class="agent-label">喂给 AI Agent 的 Prompt（复制下面这段）</div>
@@ -100,13 +112,55 @@ POST /stop    {"id"}  关闭项目</pre>
           <div class="panel">
             <div class="panel-head">
               <div class="panel-title"><img src="../assets/sticker/work.png" class="panel-sticker" alt=""> 运行日志</div>
-              <div style="display:flex;gap:8px;">
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="logFilter" class="log-filter"></select>
+                <button id="btnLogsExport" class="ghost-btn">导出</button>
                 <button id="btnLogsCopy" class="ghost-btn">复制全部</button>
                 <button id="btnLogsClear" class="ghost-btn">清空</button>
               </div>
             </div>
-            <div class="panel-desc">最近 50 条操作日志（只存内存，不写磁盘）。开发测试用。</div>
+            <div class="panel-desc">最近 200 条操作日志 + dev server 输出（只存内存，不写磁盘）。启动失败时这里能看到真实原因。</div>
             <div id="logsBox" class="logs-box"></div>
+          </div>
+        </section>
+
+        <!-- 设置视图 -->
+        <section id="view-settings" class="view">
+          <div class="panel">
+            <div class="panel-title"><img src="../assets/sticker/ready.png" class="panel-sticker" alt=""> 设置</div>
+            <div class="panel-desc">端口区间影响新项目的端口顺延范围；GitHub 仓库用于检查更新；自动打开目录页控制启动后是否先开目录页。</div>
+
+            <div class="settings-row">
+              <label>端口区间（起 - 止，8091-8100 表示最多 10 个并发项目）</label>
+              <div class="port-range-inputs">
+                <input id="setPortStart" type="number" class="input" min="1024" max="65535">
+                <span>-</span>
+                <input id="setPortEnd" type="number" class="input" min="1024" max="65535">
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <label>GitHub 仓库（用于检查更新，格式 owner/repo）</label>
+              <input id="setRepo" type="text" class="input" placeholder="lyzbcy/local-run-frontend">
+            </div>
+
+            <div class="settings-row">
+              <label class="checkbox-row"><input type="checkbox" id="setAutoNav"> 启动后自动打开目录页（关闭则直接开首页）</label>
+            </div>
+
+            <div class="modal-actions" style="margin-top:16px;">
+              <button id="btnSaveSettings" class="primary-btn">保存设置</button>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:16px;">
+            <div class="panel-title">数据管理</div>
+            <div class="panel-desc">导出项目列表为 JSON（换电脑/备份用）；导入会合并（同路径跳过）。</div>
+            <div class="modal-actions" style="justify-content:flex-start;">
+              <button id="btnExportData" class="ghost-btn">导出项目数据</button>
+              <button id="btnImportData" class="ghost-btn">导入项目数据</button>
+              <input id="importFileInput" type="file" accept=".json" style="display:none">
+            </div>
           </div>
         </section>
       </main>
@@ -132,6 +186,10 @@ POST /stop    {"id"}  关闭项目</pre>
         <div class="form-row" id="cmdRow" style="display:none">
           <label>启动命令（可改）</label>
           <input id="addCmd" type="text" class="input">
+        </div>
+        <div class="form-row" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="addStartNow" style="margin:0;">
+          <label for="addStartNow" style="margin:0;cursor:pointer;">添加后立即启动</label>
         </div>
         <div class="modal-actions">
           <button id="btnCancelAdd" class="ghost-btn">取消</button>
@@ -182,10 +240,23 @@ POST /stop    {"id"}  关闭项目</pre>
       <div class="modal-card">
         <div class="modal-title"><img src="../assets/sticker/cheer.png" class="panel-sticker" alt=""> 发现新版本</div>
         <div id="updateBody" class="update-body"></div>
-        <div class="modal-actions">
-          <button class="ghost-btn" id="btnUpdateLater">稍后再说</button>
-          <a id="updateLink" class="primary-btn" href="#" target="_blank" rel="noopener">前往下载</a>
+        <div id="updateProgress" class="update-progress" style="display:none">
+          <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+          <div id="progressText" class="progress-text">准备中…</div>
         </div>
+        <div class="modal-actions" id="updateActions">
+          <button class="ghost-btn" id="btnUpdateLater">稍后再说</button>
+          <a id="updateLink" class="ghost-btn" href="#" target="_blank" rel="noopener">前往 GitHub</a>
+          <button class="primary-btn" id="btnUpdateNow"><img src="../assets/sticker/cheer.png" class="btn-sticker" alt=""> 立即更新</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 拖拽遮罩 -->
+    <div id="dragOverlay" class="drag-overlay">
+      <div class="drag-card"><img src="../assets/sticker/go.png" alt="" class="drag-sticker">
+        <div class="drag-title">松手添加项目</div>
+        <div class="drag-desc">把文件夹拖到这里</div>
       </div>
     </div>
 
