@@ -18,6 +18,26 @@ const TYPE_LABELS = {
   'unknown': '未知'
 };
 
+// 启动失败时在卡片常驻错误条。存最近一次错误，下次成功启动清除。
+const projectErrors = {}; // { projectId: errorMsg }
+function setError(id, msg) {
+  if (msg) projectErrors[id] = msg; else delete projectErrors[id];
+  const card = document.getElementById('card-' + id);
+  if (!card) return;
+  let bar = card.querySelector('.card-error');
+  if (msg) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'card-error';
+      card.querySelector('.card-tags').after(bar);
+    }
+    bar.innerHTML = `<span>⚠️ ${escapeHtml(msg)}</span><button class="card-error-close">×</button>`;
+    bar.querySelector('.card-error-close').addEventListener('click', () => setError(id, null));
+  } else if (bar) {
+    bar.remove();
+  }
+}
+
 // 设置启动/停止按钮：保留 img，只换文字和贴纸图。isStop=true 时贴纸用 cheer，加 stop 样式。
 function setBtnState(btn, sticker, text, isStop) {
   if (!btn) return;
@@ -45,10 +65,83 @@ async function init() {
   bindAgent();
   bindUpdate();
   bindLogs();
+  bindDragDrop();
+  bindShortcuts();
+  bindQuarantine();
+  bindSettings();
   render();
 
   // 端口状态轮询
   setInterval(maybeRefreshPorts, 3000);
+}
+
+// 拖拽添加项目：把文件夹拖进窗口任意位置，自动弹添加框并填好路径
+function bindDragDrop() {
+  let dragCounter = 0;
+  const overlay = $('#dragOverlay');
+  document.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounter++;
+    if (overlay) overlay.style.display = 'flex';
+  });
+  document.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) { dragCounter = 0; if (overlay) overlay.style.display = 'none'; }
+  });
+  document.addEventListener('dragover', (e) => { e.preventDefault(); });
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    if (overlay) overlay.style.display = 'none';
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+    const file = e.dataTransfer.files[0];
+    // Electron 的 File 对象带 path
+    const p = file.path;
+    if (!p) return;
+    await openAddModalWithPath(p);
+  });
+}
+
+// 快捷键
+function bindShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    // 在输入框里不拦截
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    const cmd = e.metaKey || e.ctrlKey;
+    if (cmd && e.key === 'n') { e.preventDefault(); openAddModal(); }
+    else if (cmd && e.key === 'r') { e.preventDefault(); $('#btnRefresh').click(); }
+    else if (e.key === 'Escape') {
+      // Esc 关闭任何打开的模态框
+      ['addModal', 'aboutModal', 'updateModal', 'settingsModal'].forEach(id => {
+        const m = $('#' + id); if (m) m.style.display = 'none';
+      });
+    }
+  });
+}
+
+// quarantine 自助去除
+function bindQuarantine() {
+  window.api.onQuarantineDetected(() => {
+    const bar = $('#quarantineBar');
+    if (bar) bar.style.display = 'flex';
+  });
+  const btn = $('#btnRemoveQuarantine');
+  if (btn) btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = '处理中…';
+    const r = await window.api.removeQuarantine();
+    btn.disabled = false; btn.textContent = '一键去除';
+    if (r.ok) {
+      $('#quarantineBar').style.display = 'none';
+      toast('隔离标记已去除，以后打开不会再被拦', 'success');
+    } else {
+      toast(r.error || '去除失败', 'error');
+    }
+  });
+  const dismiss = $('#btnQuarantineDismiss');
+  if (dismiss) dismiss.addEventListener('click', () => $('#quarantineBar').style.display = 'none');
 }
 
 async function refreshStore() {
@@ -68,22 +161,27 @@ function switchView(view) {
   currentView = view;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   $$('.view').forEach(v => v.classList.remove('active'));
-  const titles = { mine: '我的项目', favorites: '收藏', recent: '最近', ports: '网关端口', agent: 'AI Agent 接入', logs: '运行日志' };
+  const titles = { mine: '我的项目', favorites: '收藏', recent: '最近', ports: '网关端口', agent: 'AI Agent 接入', logs: '运行日志', settings: '设置' };
   $('#viewTitle').textContent = titles[view] || '';
 
   $('#view-projects').classList.remove('active');
   $('#view-ports').classList.remove('active');
   $('#view-agent').classList.remove('active');
   $('#view-logs').classList.remove('active');
+  $('#view-settings').classList.remove('active');
   if (view === 'ports') {
     $('#view-ports').classList.add('active');
     renderPorts();
   } else if (view === 'agent') {
     $('#view-agent').classList.add('active');
     fillAgentPrompt();
+    refreshCtrlStatus();
   } else if (view === 'logs') {
     $('#view-logs').classList.add('active');
     renderLogs();
+  } else if (view === 'settings') {
+    $('#view-settings').classList.add('active');
+    renderSettings();
   } else {
     $('#view-projects').classList.add('active');
     render();
@@ -148,19 +246,26 @@ function render() {
         card.classList.toggle('running', runningIds.has(p.id));
         const badge = card.querySelector('.tag.running');
         const btn = card.querySelector('.btn-start-stop');
+        const restartBtn = card.querySelector('.btn-restart');
         if (runningIds.has(p.id)) {
-          if (!badge) {}
+          if (badge) badge.style.display = '';
           setBtnState(btn, 'cheer', '停止', true);
+          if (restartBtn) restartBtn.style.display = '';
         } else {
+          if (badge) badge.style.display = 'none';
           setBtnState(btn, 'go', '启动', false);
+          if (restartBtn) restartBtn.style.display = 'none';
         }
       }
     });
   });
 
   grid.innerHTML = list.map(p => projectCardHtml(p)).join('');
-  // 绑定卡片事件
-  list.forEach(p => bindCard(p));
+  // 绑定卡片事件 + 恢复错误条
+  list.forEach(p => {
+    bindCard(p);
+    if (projectErrors[p.id]) setError(p.id, projectErrors[p.id]);
+  });
 }
 
 function projectCardHtml(p) {
@@ -182,7 +287,9 @@ function projectCardHtml(p) {
     </div>
     <div class="card-actions">
       <button class="primary-btn btn-start-stop"><img src="../assets/sticker/go.png" class="btn-sticker" alt=""> 启动</button>
-      <button class="ghost-btn btn-reveal">打开</button>
+      <button class="ghost-btn btn-restart" title="停止后重新启动（改了代码用这个）" style="display:none">重启</button>
+      <button class="ghost-btn btn-reveal" title="在文件夹中打开">定位</button>
+      <button class="mini-btn btn-redetect" title="重新识别项目类型"><img src="../assets/sticker/expect.png" alt="重新识别"></button>
       <button class="mini-btn btn-fav ${p.favorite ? 'active' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}"><img src="../assets/sticker/love.png" alt="收藏"></button>
       <button class="mini-btn btn-del" title="删除">删除</button>
     </div>
@@ -194,6 +301,19 @@ function bindCard(p) {
   if (!card) return;
   card.querySelector('.btn-start-stop').addEventListener('click', () => onToggleStart(p));
   card.querySelector('.btn-reveal').addEventListener('click', () => window.api.revealProject(p.path));
+  card.querySelector('.btn-restart').addEventListener('click', () => onRestart(p));
+  const rdBtn = card.querySelector('.btn-redetect');
+  if (rdBtn) rdBtn.addEventListener('click', async () => {
+    toast('正在重新识别…');
+    const r = await window.api.redetectProject(p.id);
+    if (r.ok) {
+      const label = TYPE_LABELS[r.project.type] || r.project.type;
+      toast(`已识别为 ${label}`, 'success');
+      await refreshStore(); render();
+    } else {
+      toast(`识别失败：${r.error}`, 'error');
+    }
+  });
   card.querySelector('.btn-fav').addEventListener('click', async () => {
     await window.api.updateProject({ id: p.id, patch: { favorite: !p.favorite } });
     await refreshStore(); render();
@@ -204,6 +324,33 @@ function bindCard(p) {
     await refreshStore(); render();
     toast('已删除', 'success');
   });
+}
+
+// 重启：停止后立即启动（改了代码用这个）
+async function onRestart(p) {
+  const restartBtn = document.querySelector(`#card-${p.id} .btn-restart`);
+  if (restartBtn) { restartBtn.disabled = true; restartBtn.textContent = '重启中…'; }
+  toast(`正在重启「${p.name}」…`);
+  await window.api.stopProject(p.id);
+  setError(p.id, null);
+  // 等端口释放（runner SIGKILL 兜底 1500ms，留足时间）
+  await new Promise(r => setTimeout(r, 1800));
+  const r = await window.api.startProject(p.id);
+  if (restartBtn) { restartBtn.disabled = false; restartBtn.textContent = '重启'; }
+  if (r.ok) {
+    toast(`已重启 → ${r.instance.baseUrl}`, 'success');
+    render();
+    const warnings = r.instance.backendWarnings || [];
+    if (warnings.length) {
+      setError(p.id, warnings.join('；'));
+      toast('⚠️ 已重启，但后端依赖不可达，接口会失败', 'error');
+    }
+  } else {
+    setError(p.id, r.error || '未知错误');
+    toast(`重启失败：${r.error || '未知错误'}`, 'error');
+    render();
+    switchView('logs');
+  }
 }
 
 let starting = new Set();
@@ -226,11 +373,22 @@ async function onToggleStart(p) {
   starting.delete(p.id);
   if (btn) btn.disabled = false;
   if (r.ok) {
+    setError(p.id, null);
     toast(`已启动 → ${r.instance.baseUrl}`, 'success');
     render();
+    // 后端依赖警告：dev server 活着但 proxy 目标不可达，页面会白屏/接口失败
+    const warnings = r.instance.backendWarnings || [];
+    if (warnings.length) {
+      setError(p.id, warnings.join('；'));
+      toast('⚠️ 已启动，但后端依赖不可达，接口会失败（详见卡片提示和日志）', 'error');
+    }
   } else {
-    toast(`启动失败：${r.error || '未知错误'}`, 'error');
+    const errMsg = r.error || '未知错误';
+    setError(p.id, errMsg);
+    toast(`启动失败：${errMsg}`, 'error');
     render();
+    // 失败时自动切到日志视图，方便看真实原因
+    switchView('logs');
   }
 }
 
@@ -239,7 +397,6 @@ function bindAddModal() {
   $('#btnCancelAdd').addEventListener('click', closeAddModal);
   $('#btnPick').addEventListener('click', pickDirectory);
   $('#btnConfirmAdd').addEventListener('click', confirmAdd);
-  $('.modal-backdrop', $('#addModal'));
   $('#addModal').querySelector('.modal-backdrop').addEventListener('click', closeAddModal);
 }
 
@@ -250,21 +407,32 @@ function openAddModal() {
   $('#detectInfo').style.display = 'none';
   $('#cmdRow').style.display = 'none';
   $('#btnConfirmAdd').disabled = true;
+  const cb = $('#addStartNow'); if (cb) cb.checked = false;
   $('#addModal').style.display = 'flex';
 }
 
-function closeAddModal() {
-  $('#addModal').style.display = 'none';
+// 拖拽或外部传入路径时的入口：探测后填进添加框
+async function openAddModalWithPath(p) {
+  $('#addModal').style.display = 'flex';
+  $('#addPath').value = p;
+  $('#addName').value = p.split(/[\\/]/).pop();
+  $('#detectInfo').style.display = '';
+  $('#detectInfo').className = 'detect-info';
+  $('#detectInfo').innerHTML = '正在识别项目类型…';
+  $('#btnConfirmAdd').disabled = true;
+  const r = await window.api.detectPath(p);
+  if (!r) { closeAddModal(); return; }
+  if (r.error) {
+    $('#detectInfo').className = 'detect-info warn';
+    $('#detectInfo').innerHTML = `⚠️ ${escapeHtml(r.error)}`;
+    return;
+  }
+  picked = r;
+  showDetectResult(r);
 }
 
-let picked = null;
-async function pickDirectory() {
-  const r = await window.api.openDirectory();
-  if (!r) return;
-  picked = r;
-  $('#addPath').value = r.path;
-  if (!$('#addName').value) $('#addName').value = r.path.split(/[\\/]/).pop();
-  // 显示探测结果
+// 把探测结果渲染到添加框的 detectInfo（对话框/拖拽共用）
+function showDetectResult(r) {
   const info = $('#detectInfo');
   const label = TYPE_LABELS[r.type] || r.type;
   if (r.framework) {
@@ -286,10 +454,25 @@ async function pickDirectory() {
   $('#btnConfirmAdd').disabled = false;
 }
 
+function closeAddModal() {
+  $('#addModal').style.display = 'none';
+}
+
+let picked = null;
+async function pickDirectory() {
+  const r = await window.api.openDirectory();
+  if (!r) return;
+  picked = r;
+  $('#addPath').value = r.path;
+  if (!$('#addName').value) $('#addName').value = r.path.split(/[\\/]/).pop();
+  showDetectResult(r);
+}
+
 async function confirmAdd() {
   if (!picked) return;
   const name = $('#addName').value.trim() || picked.path.split(/[\\/]/).pop();
   const cmd = $('#addCmd').value.trim();
+  const startNow = $('#addStartNow') && $('#addStartNow').checked;
   const r = await window.api.addProject({
     name,
     projectPath: picked.path,
@@ -305,6 +488,10 @@ async function confirmAdd() {
   closeAddModal();
   await refreshStore();
   render();
+  // 添加后立即启动
+  if (r.created && startNow && r.project) {
+    onToggleStart(r.project);
+  }
 }
 
 // --- 端口管理 ---
@@ -352,41 +539,143 @@ async function maybeRefreshPorts() {
 }
 
 // --- 日志 ---
+let logFilter = 'all'; // all | 某项目 id
 async function renderLogs() {
   const logs = await window.api.getLogs();
   const box = $('#logsBox');
+  // 渲染过滤下拉（项目列表）
+  renderLogFilter();
   if (!logs || !logs.length) {
     box.innerHTML = '<div class="logs-empty">还没有日志。启动或停止一个项目，日志会出现在这里。</div>';
     return;
   }
+  let filtered = logs;
+  if (logFilter !== 'all') filtered = logs.filter(l => (l.meta && l.meta.projectId) === logFilter);
+  if (!filtered.length) {
+    box.innerHTML = '<div class="logs-empty">该项目暂无日志。</div>';
+    return;
+  }
   const levelClass = { ok: 'ok', warn: 'warn', error: 'err' };
   const levelText = { info: '信息', ok: '成功', warn: '警告', error: '错误' };
-  box.innerHTML = logs.slice().reverse().map(l => {
+  const projName = (pid) => {
+    const p = (store.projects || []).find(x => x.id === pid);
+    return p ? p.name : '';
+  };
+  box.innerHTML = filtered.slice().reverse().map(l => {
     const time = new Date(l.t).toLocaleTimeString('zh-CN', { hour12: false });
     const lv = l.level || 'info';
+    const pn = l.meta && l.meta.projectId ? projName(l.meta.projectId) : '';
+    const projTag = pn ? `<span class="log-proj">${escapeHtml(pn)}</span>` : '';
     return `<div class="log-row"><span class="log-time">${time}</span>` +
            `<span class="log-level ${levelClass[lv] || ''}">${levelText[lv] || lv}</span>` +
+           projTag +
            `<span class="log-msg">${escapeHtml(l.msg)}</span></div>`;
   }).join('');
 }
 
+function renderLogFilter() {
+  const sel = $('#logFilter');
+  if (!sel) return;
+  const opts = ['<option value="all">全部项目</option>'];
+  for (const p of (store.projects || [])) {
+    opts.push(`<option value="${p.id}" ${logFilter === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+}
+
+// --- 设置 ---
+function renderSettings() {
+  const s = store.settings || {};
+  $('#setPortStart').value = (s.portRange && s.portRange[0]) || 8091;
+  $('#setPortEnd').value = (s.portRange && s.portRange[1]) || 8100;
+  $('#setRepo').value = s.githubRepo || 'lyzbcy/local-run-frontend';
+  $('#setAutoNav').checked = s.autoOpenNav !== false;
+}
+
+function bindSettings() {
+  $('#btnSaveSettings').addEventListener('click', async () => {
+    const start = parseInt($('#setPortStart').value, 10);
+    const end = parseInt($('#setPortEnd').value, 10);
+    if (!start || !end || start >= end || start < 1024 || end > 65535) { toast('端口区间不合法（需 1024-65535，起始 < 结束）', 'error'); return; }
+    const settings = {
+      portRange: [start, end],
+      githubRepo: $('#setRepo').value.trim() || 'lyzbcy/local-run-frontend',
+      autoOpenNav: $('#setAutoNav').checked
+    };
+    const r = await window.api.saveSettings(settings);
+    if (r.ok) { toast('设置已保存', 'success'); await refreshStore(); }
+    else toast(r.error || '保存失败', 'error');
+  });
+  $('#btnExportData').addEventListener('click', async () => {
+    const data = { exportedAt: new Date().toISOString(), app: 'local-run-frontend', projects: store.projects || [] };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `local-run-frontend-projects-${Date.now()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('已导出 ' + (store.projects || []).length + ' 个项目', 'success');
+  });
+  $('#btnImportData').addEventListener('click', () => $('#importFileInput').click());
+  $('#importFileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const txt = await file.text();
+      const data = JSON.parse(txt);
+      const projects = Array.isArray(data) ? data : data.projects;
+      if (!Array.isArray(projects)) { toast('文件格式不对', 'error'); return; }
+      const r = await window.api.importData(projects);
+      if (r.ok) {
+        toast(`导入完成：新增 ${r.added}，跳过 ${r.skipped}`, 'success');
+        await refreshStore(); render();
+      } else toast(r.error || '导入失败', 'error');
+    } catch (err) { toast('解析失败：' + err.message, 'error'); }
+    e.target.value = ''; // 允许重复选同一文件
+  });
+}
+
 // --- AI Agent ---
 function fillAgentPrompt() {
-  const prompt = `你正在使用「本地运行前端项目」桌面软件。它在本机运行了一个控制接口（http://127.0.0.1:47800），你可以通过它控制软件，帮用户启动/关闭前端项目。
+  const prompt = `你正在使用「本地运行前端项目」桌面软件。它在本机运行了一个控制接口（http://127.0.0.1:47800），你可以通过它控制软件，帮用户启动/关闭/管理前端项目。
 
 可用接口（仅本机，JSON）：
-- GET  http://127.0.0.1:47800/projects   拿到所有项目列表（含 id / name / path / type）
-- GET  http://127.0.0.1:47800/status     查看当前运行中的实例
-- POST  http://127.0.0.1:47800/start     body: {"id":"<projectId>"}  启动项目（会自动开浏览器和目录页）
-- POST  http://127.0.0.1:47800/stop      body: {"id":"<projectId>"}  关闭项目
+- GET  http://127.0.0.1:47800/projects    拿到所有项目列表（含 id / name / path / type）
+- GET  http://127.0.0.1:47800/status      查看当前运行中的实例
+- POST http://127.0.0.1:47800/start       body: {"id":"<projectId>"}  启动项目（会自动开浏览器和目录页）
+- POST http://127.0.0.1:47800/stop        body: {"id":"<projectId>"}  关闭项目
+- POST http://127.0.0.1:47800/restart     body: {"id":"<projectId>"}  重启项目（改了代码用这个）
+- POST http://127.0.0.1:47800/add         body: {"path":"/abs/path"[,"name":"别名"]}  添加项目（自动探测类型）
+- POST http://127.0.0.1:47800/remove      body: {"id":"<projectId>"}  删除项目（仅从列表删，不删文件）
 
 工作方式：
 1. 用户说"启动 XXX 项目"时，先 GET /projects 找到名字匹配的项目的 id，再 POST /start。
 2. 用户说"关闭 / 停掉"时，先 GET /status 看运行中的，再 POST /stop。
-3. 启动后把返回的 baseUrl / navUrl（目录页）告诉用户。
+3. 用户说"重启"时，POST /restart。
+4. 用户说"添加项目 / 这个目录帮我加上"时，POST /add 传 path。
+5. 启动后把返回的 baseUrl / navUrl（目录页）告诉用户。
 
 注意：这个软件不会往用户的项目里写任何文件，所有预览都在软件内部完成。`;
   $('#agentPrompt').textContent = prompt;
+}
+
+async function refreshCtrlStatus() {
+  const badge = $('#ctrlStatusBadge');
+  const hint = $('#ctrlErrorHint');
+  if (!badge) return;
+  const r = await window.api.ctrlStatus();
+  if (r.ready) {
+    badge.textContent = '● 运行中';
+    badge.className = 'ctrl-badge ok';
+    if (hint) hint.style.display = 'none';
+  } else {
+    badge.textContent = '● 未运行';
+    badge.className = 'ctrl-badge err';
+    if (hint && r.error) {
+      hint.style.display = '';
+      hint.textContent = '⚠️ 控制接口未启动：' + r.error + '。AI Agent 调用会失败。可能是 47800 端口被占用。';
+    }
+  }
 }
 
 function bindAgent() {
@@ -394,11 +683,62 @@ function bindAgent() {
     const txt = $('#agentPrompt').textContent;
     navigator.clipboard.writeText(txt).then(() => toast('Prompt 已复制', 'success'));
   });
+  $('#btnTestCtrl').addEventListener('click', async () => {
+    const btn = $('#btnTestCtrl');
+    btn.disabled = true; btn.textContent = '测试中…';
+    try {
+      const r = await fetch('http://127.0.0.1:47800/', { method: 'GET' });
+      const j = await r.json();
+      if (j.ok) toast('✓ 连接成功，接口可用', 'success');
+      else toast('接口返回异常', 'error');
+    } catch (e) {
+      toast('✗ 连接失败：' + e.message, 'error');
+    }
+    btn.disabled = false; btn.textContent = '测试连接';
+  });
 }
 
 // --- 更新 ---
 function bindUpdate() {
   window.api.onUpdateAvailable((info) => showUpdate(info));
+  // 进度推送
+  window.api.onUpdateProgress(({ stage, detail }) => {
+    const progress = $('#updateProgress');
+    const fill = $('#progressFill');
+    const text = $('#progressText');
+    if (stage === 'download' && typeof detail === 'object') {
+      progress.style.display = '';
+      fill.style.width = (detail.percent || 0) + '%';
+      const mb = detail.total ? (detail.received / 1048576).toFixed(1) + '/' + (detail.total / 1048576).toFixed(1) + ' MB' : (detail.received / 1048576).toFixed(1) + ' MB';
+      text.textContent = `下载中 ${detail.percent}% · ${mb}`;
+    } else if (stage === 'check') {
+      progress.style.display = '';
+      fill.style.width = '0%';
+      text.textContent = typeof detail === 'string' ? detail : '检查中…';
+    } else if (stage === 'extract') {
+      progress.style.display = '';
+      fill.style.width = '100%';
+      text.textContent = '正在解压…';
+    } else if (stage === 'replace') {
+      text.textContent = '正在替换应用程序（请在系统弹窗里授权）…';
+    } else if (stage === 'done') {
+      text.textContent = typeof detail === 'string' ? detail : '更新完成，正在重启…';
+    }
+  });
+  $('#btnUpdateNow').addEventListener('click', async () => {
+    const actions = $('#updateActions');
+    const progress = $('#updateProgress');
+    actions.style.display = 'none';
+    progress.style.display = '';
+    $('#progressText').textContent = '正在获取更新信息…';
+    const r = await window.api.performUpdate();
+    if (!r.ok) {
+      actions.style.display = '';
+      progress.style.display = 'none';
+      toast(`更新失败：${r.error}`, 'error');
+    }
+    // 成功的话会触发重启，无需处理
+  });
   // 也手动查一次（启动后）
   setTimeout(async () => {
     const r = await window.api.checkUpdate();
@@ -409,15 +749,41 @@ function bindUpdate() {
 function showUpdate(info) {
   $('#updateBody').innerHTML = `当前版本 <b>v${info.current}</b><br>最新版本 <b>v${info.latest}</b><br><br>${info.name ? escapeHtml(info.name) : ''}`;
   $('#updateLink').href = info.htmlUrl || '#';
+  $('#updateProgress').style.display = 'none';
+  $('#updateActions').style.display = '';
   $('#updateModal').style.display = 'flex';
 }
 
 // --- 日志（开发用） ---
 function bindLogs() {
-  // 默认把日志打到 console；--dev 模式可在 devtools 看
+  // dev server 的实时输出：既打 console（--dev 模式可看），又实时刷新日志面板
   window.api.onProjectLog(({ id, msg }) => {
     // eslint-disable-next-line no-console
     console.log(`[${id}] ${msg}`);
+    // 如果当前在日志视图，实时刷新（不刷会等到切回才更新）
+    if (currentView === 'logs') renderLogs();
+  });
+  // 日志过滤下拉
+  const sel = $('#logFilter');
+  if (sel) sel.addEventListener('change', () => { logFilter = sel.value; renderLogs(); });
+  // 导出日志到文件
+  const btnExport = $('#btnLogsExport');
+  if (btnExport) btnExport.addEventListener('click', async () => {
+    const logs = await window.api.getLogs();
+    if (!logs || !logs.length) { toast('没有日志可导出'); return; }
+    const text = logs.map(l => {
+      const time = new Date(l.t).toLocaleString('zh-CN', { hour12: false });
+      const lv = (l.level || 'info').toUpperCase();
+      const pn = l.meta && l.meta.projectId ? `[${l.meta.projectId}]` : '';
+      return `[${time}] [${lv}] ${pn} ${l.msg}`;
+    }).join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `local-run-frontend-logs-${Date.now()}.txt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('已导出 ' + logs.length + ' 条日志', 'success');
   });
 }
 

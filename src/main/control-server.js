@@ -5,13 +5,16 @@
 //   GET  /projects               → 项目列表
 //   POST /start   {id}           → 启动
 //   POST /stop    {id}           → 关闭
+//   POST /restart {id}           → 重启（停止后启动）
+//   POST /add     {path,name?}   → 添加项目（自动探测类型）
+//   POST /remove  {id}           → 删除项目（仅从列表删，不删文件）
 
 const http = require('http');
 const { shell } = require('electron');
 
 const CTRL_PORT = 47800;
 
-function createControlServer({ getStore, startProject, stopProject, getStatus, onLog }) {
+function createControlServer({ getStore, saveStore, startProject, stopProject, getStatus, detectFn, addProjectFn, removeProjectFn, onLog }) {
   const log = (...a) => { try { (onLog || console.log)('[ctrl]', ...a); } catch {} };
 
   function send(res, code, obj) {
@@ -22,12 +25,30 @@ function createControlServer({ getStore, startProject, stopProject, getStatus, o
   function readBody(req) {
     return new Promise(resolve => {
       let raw = '';
-      req.on('data', c => raw += c);
+      let tooBig = false;
+      req.on('data', c => {
+        if (tooBig) return;
+        raw += c;
+        // 限制 2MB，防本地恶意/失控进程 OOM
+        if (raw.length > 2 * 1024 * 1024) { tooBig = true; resolve({ __tooBig: true }); }
+      });
       req.on('end', () => {
+        if (tooBig) return; // 已 resolve
         try { resolve(raw ? JSON.parse(raw) : {}); }
         catch { resolve({}); }
       });
     });
+  }
+
+  // 内部辅助：启动并开浏览器
+  async function startAndRespond(res, project) {
+    const store = getStore();
+    const r = await startProject(project, store.settings.portRange, log);
+    if (r.ok) {
+      try { shell.openExternal(r.instance.navUrl || r.instance.homeUrl); } catch {}
+      return send(res, 200, { ok: true, instance: { port: r.instance.port, baseUrl: r.instance.baseUrl, navUrl: r.instance.navUrl, homeUrl: r.instance.homeUrl } });
+    }
+    return send(res, 500, { ok: false, error: r.error });
   }
 
   const server = http.createServer(async (req, res) => {
@@ -45,21 +66,45 @@ function createControlServer({ getStore, startProject, stopProject, getStatus, o
         const store = getStore();
         const project = store.projects.find(p => p.id === id);
         if (!project) return send(res, 404, { ok: false, error: '项目不存在' });
-        const r = await startProject(project, store.settings.portRange, log);
-        if (r.ok) {
-          // 自动开浏览器（agent 模式也开，方便 agent 验证）
-          try { shell.openExternal(r.instance.navUrl || r.instance.homeUrl); } catch {}
-          return send(res, 200, { ok: true, instance: { port: r.instance.port, baseUrl: r.instance.baseUrl, navUrl: r.instance.navUrl, homeUrl: r.instance.homeUrl } });
-        }
-        return send(res, 500, { ok: false, error: r.error });
+        return startAndRespond(res, project);
+      }
+      if (req.method === 'POST' && url === '/restart') {
+        const { id } = await readBody(req);
+        const store = getStore();
+        const project = store.projects.find(p => p.id === id);
+        if (!project) return send(res, 404, { ok: false, error: '项目不存在' });
+        stopProject(id, log);
+        // 等 SIGKILL 兜底完成（runner.js 里是 1500ms），留足端口释放时间
+        await new Promise(r => setTimeout(r, 1800));
+        return startAndRespond(res, project);
       }
       if (req.method === 'POST' && url === '/stop') {
         const { id } = await readBody(req);
         stopProject(id, log);
         return send(res, 200, { ok: true });
       }
+      if (req.method === 'POST' && url === '/add') {
+        const body = await readBody(req);
+        const p = body.path;
+        if (!p || typeof p !== 'string') return send(res, 400, { ok: false, error: '缺少 path' });
+        const info = detectFn(p);
+        const store = getStore();
+        const { data: next, project, created } = addProjectFn(store, { name: body.name || null, projectPath: p, type: info.type, startCommand: info.startCommand, framework: !!info.framework });
+        saveStore(next);
+        if (!created) return send(res, 200, { ok: true, project, created: false, msg: '项目已存在' });
+        log(`[agent] 添加项目「${project.name}」(${info.type})`);
+        return send(res, 200, { ok: true, project, created: true });
+      }
+      if (req.method === 'POST' && url === '/remove') {
+        const { id } = await readBody(req);
+        stopProject(id, log);
+        const store = getStore();
+        const next = removeProjectFn(store, id);
+        saveStore(next);
+        return send(res, 200, { ok: true });
+      }
       if (req.method === 'GET' && url === '/') {
-        return send(res, 200, { ok: true, service: '本地运行前端项目 控制接口', version: '1' });
+        return send(res, 200, { ok: true, service: '本地运行前端项目 控制接口', version: '2', endpoints: ['GET /status','GET /projects','POST /start','POST /stop','POST /restart','POST /add','POST /remove'] });
       }
       send(res, 404, { ok: false, error: 'not found' });
     } catch (e) {

@@ -65,16 +65,202 @@ function escapeHtml(s) {
   }[c]));
 }
 
-// token 配置：默认用 qv-admin 这类企微项目的典型值（最常见案例）。
-// 项目可通过 navTokenConfig 覆盖（testBackend/loginUrl/cookieName/checkPath）。
-const DEFAULT_TOKEN_CONFIG = {
-  testBackend: 'https://platform-test.wshoto.com',
-  loginUrl: 'https://platform-test.wshoto.com/login',
-  cookieName: 'token',
-  // 校验 token 用的接口（dashboard 是登录后第一个接口，能顺带验有效性）
-  checkPath: '/bff/index/private/pc/dashboard',
-  checkMethod: 'POST'
-};
+// 渲染 token 区。tc 为 null 时完全不渲染（开源友好：对不需要登录态的项目零干扰）。
+// tc 存在时渲染完整的可配置 UI（后端/cookie名/校验路径/方法 都能改，改完写回 store）。
+function tokenBlock(tc, hasCookieToken) {
+  if (!tc) return ''; // 探测不到 = 不显示
+  const detected = tc.autoDetected
+    ? `<div class="tk-detected">✨ 已从项目代码自动探测到后端地址（来源：<code>${escapeHtml(tc.source || '未知')}</code>）。字段不对可手动修改。</div>`
+    : '';
+  return `
+<div class="tk" id="tokenBlock">
+  <h2>本地登录态（注入 token）</h2>
+  <div class="desc">
+    <b>原理</b>：很多后台项目（CRM/管理端类）在 <code>127.0.0.1</code> 上无法直接登录，需要从测试环境「搬」token 过来。<br>
+    token 写进 cookie 后，<code>本页 dev server</code> 立即获得登录态（cookie 同 <code>127.0.0.1</code> 不分端口）。<br>
+    这是<b>真实鉴权</b>（非绕过）——请求带 <code>Authorization: Bearer &lt;token&gt;</code> 去后端真校验，失效就 401。
+    <br><br><b>不需要登录态的项目请忽略此区域</b>，直接点下面的路由即可。
+  </div>
+  ${detected}
+  <details class="tk-cfg" ${tc.autoDetected ? '' : 'open'}>
+    <summary>⚙️ 后端配置（点开修改）</summary>
+    <div class="tk-cfg-grid">
+      <label>后端地址<input type="text" id="cfgBackend" value="${escapeHtml(tc.testBackend || '')}" placeholder="https://your-test-backend.com"></label>
+      <label>登录页 URL<input type="text" id="cfgLoginUrl" value="${escapeHtml(tc.loginUrl || '')}" placeholder="https://your-test-backend.com/login"></label>
+      <label>cookie 名<input type="text" id="cfgCookieName" value="${escapeHtml(tc.cookieName || 'token')}" placeholder="token"></label>
+      <label>校验接口路径<input type="text" id="cfgCheckPath" value="${escapeHtml(tc.checkPath || '')}" placeholder="/api/user/info（留空则不校验）"></label>
+      <label>校验方法
+        <select id="cfgCheckMethod">
+          <option value="GET" ${(tc.checkMethod || 'GET').toUpperCase() === 'GET' ? 'selected' : ''}>GET</option>
+          <option value="POST" ${tc.checkMethod === 'POST' ? 'selected' : ''}>POST</option>
+        </select>
+      </label>
+    </div>
+    <button class="btn btn-ghost" id="btnSaveCfg" style="margin-top:8px">保存配置</button>
+  </details>
+  <div class="desc" style="margin-top:14px;margin-bottom:8px">
+    <b>怎么拿 token</b>：打开 <a href="${escapeHtml(tc.loginUrl || tc.testBackend)}" target="_blank">${escapeHtml(tc.loginUrl || tc.testBackend)}</a> 登录 → F12 → Application → Cookies → 复制 <code>${escapeHtml(tc.cookieName || 'token')}</code> 的值 → 粘贴到下面 → 点「应用 token」。
+  </div>
+  <div class="tk-row">
+    <input type="text" id="tokenInput" placeholder="把从 ${escapeHtml(tc.testBackend || '后端')} 复制的 ${escapeHtml(tc.cookieName || 'token')} 粘贴到这里…" autocomplete="off">
+    <button class="btn btn-pri" id="btnApply">应用 token</button>
+    <button class="btn btn-ghost" id="btnCheck">重新校验</button>
+    <button class="btn btn-danger" id="btnClear">清除</button>
+  </div>
+  <div class="tk-status" id="tkStatus"></div>
+  <div class="tk-meta" id="tkMeta"></div>
+</div>`;
+}
+
+// ===== token 注入配置：完全自适应，零硬编码 =====
+// 设计原则：开源软件不能内置任何特定公司/项目的域名、接口、cookie 名。
+// 自动从项目代码里探测，探不到就完全隐藏 token 区（对不需要登录态的项目零干扰）。
+// 项目可在 store 里存 tokenConfig 覆盖自动探测结果。
+//
+// 探测顺序：
+// 1. 项目 .env / .env.development 里的 VITE_API_BASE / API_BASE / VUE_APP_API 等
+// 2. 项目 src 下的 axios baseURL / request baseURL 配置
+// 3. package.json name/description 含特定关键字
+// 探测出 testBackend 后，loginUrl 默认 = testBackend + /login，
+// cookieName 默认 'token'，checkPath 默认用 /bff/ 或 /api/ 第一个匹配。
+// 用户可在目录页 token 区 UI 里改任意字段（覆盖写入 store）。
+
+function tryReadFile(p) {
+  try { return fs.readFileSync(p, 'utf8'); } catch { return null; }
+}
+
+// 从 .env* 文件里抽 API 后端地址
+function detectBackendFromEnv(root) {
+  const candidates = ['.env.development.local', '.env.development', '.env.local', '.env'];
+  // 注意：VUE_APP_BASE_URL 是 vue-cli 生态最常见的 API 基址约定（qv-admin 等真实项目在用）。
+  // 正则要求值必须是完整 http(s) URL，所以 VUE_APP_COS_URL='/' 这类相对路径不会误命中；
+  // 但 POSTER_URL/CDN_URL 等非后端 key 不在名单里，不会被误当后端。
+  const keys = [
+    'VITE_API_BASE', 'VITE_BASE_API', 'VITE_APP_API_BASE', 'VITE_GLOB_API_URL',
+    'VUE_APP_API_BASE', 'VUE_APP_BASE_API', 'VUE_APP_BASE_URL', 'VUE_APP_API_URL',
+    'REACT_APP_API_BASE', 'API_BASE'
+  ];
+  for (const f of candidates) {
+    const txt = tryReadFile(path.join(root, f));
+    if (!txt) continue;
+    for (const k of keys) {
+      const re = new RegExp('^\\s*' + k + '\\s*=\\s*["\']?(https?://[^"\'\\s#]+)', 'm');
+      const m = txt.match(re);
+      if (m && m[1]) return { backend: trimSlash(m[1]), source: `${f}:${k}` };
+    }
+  }
+  return null;
+}
+
+function trimSlash(s) { return String(s).replace(/\/+$/, ''); }
+
+// 从 src 代码里抽 axios baseURL（扫一层常见目录，限深度避免慢）
+function detectBackendFromSrc(root) {
+  const dirs = ['src', 'api', 'request', 'utils'];
+  const urlRe = /baseURL\s*[:=]\s*['"`](https?:\/\/[^'"`#]+)['"`]/;
+  const envRe = /baseURL\s*[:=]\s*['"`]([^'"`]+)['"`]/; // 可能是变量，先抓出来再判
+  for (const d of dirs) {
+    const dir = path.join(root, d);
+    if (!fs.existsSync(dir)) continue;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (!e.isFile() || !/\.(js|ts|mjs|jsx|tsx)$/.test(e.name)) continue;
+      const txt = tryReadFile(path.join(dir, e.name));
+      if (!txt) continue;
+      const m1 = txt.match(urlRe);
+      if (m1 && m1[1] && /^https?:/.test(m1[1])) return { backend: trimSlash(m1[1]), source: `${d}/${e.name}:baseURL` };
+      // 变量型 baseURL（如 baseURL: import.meta.env.VITE_API_BASE）交给 env 探测兜底
+      const m2 = txt.match(envRe);
+      if (m2 && m2[1] && /env/i.test(m2[1])) continue;
+    }
+  }
+  return null;
+}
+
+// 从项目源码推断「校验路径」候选列表（证据式：只收源码里真实存在的接口路径）。
+// 思路：登录后第一个要鉴权的接口最能验 token。按语义排序：
+//   dashboard（登录后首页数据）> getUser/userInfo/currentUser（用户态）> private（鉴权标记）。
+// 返回 [{path, method}]，最多 5 个；扫不到返回 []。
+// 扫描范围：src/api 优先（绝大多数项目 API 集中在此），没有再扫 src 根（限文件数防慢）。
+function inferCheckPathCandidates(projectRoot) {
+  const found = new Map(); // path -> {score, method}
+  const URL_RE = /url\s*:\s*['"`](\/[^'"`\s]{3,120})['"`]/g;
+  const METHOD_RE = /method\s*:\s*['"`](get|post)['"`]/i;
+
+  const scanFile = (abs) => {
+    let txt;
+    try { txt = fs.readFileSync(abs, 'utf8'); } catch { return; }
+    if (txt.length > 512 * 1024) txt = txt.slice(0, 512 * 1024);
+    let m;
+    URL_RE.lastIndex = 0;
+    while ((m = URL_RE.exec(txt))) {
+      const p = m[1];
+      // 跳过静态资源/路由型路径，只收像接口的
+      if (/\.(html|png|jpg|css|js|svg|json)$/i.test(p)) continue;
+      let score = 0;
+      if (/dashboard/i.test(p)) score += 3;
+      if (/getuser|userinfo|currentuser|\/user\/|mine|profile|getinfo/i.test(p)) score += 2;
+      if (/private|auth|permission|menu/i.test(p)) score += 1;
+      if (score === 0) continue;
+      // 邻近找 method（接口定义一般是 { url: '...', method: 'post' } 的对象字面量）
+      const ctx = txt.slice(Math.max(0, m.index - 200), m.index + 300);
+      const mm = ctx.match(METHOD_RE);
+      const method = mm ? mm[1].toUpperCase() : 'GET';
+      const prev = found.get(p);
+      if (!prev || prev.score < score) found.set(p, { score, method });
+    }
+  };
+
+  const walk = (dir, budget) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return budget; }
+    for (const e of entries) {
+      if (budget.n <= 0) return budget.n;
+      if (e.isDirectory()) {
+        if (EXCLUDE_DIR.has(e.name) || e.name.startsWith('.')) continue;
+        walk(path.join(dir, e.name), budget);
+      } else if (e.isFile() && /\.(ts|js|jsx|tsx|mjs|vue)$/.test(e.name)) {
+        budget.n--;
+        scanFile(path.join(dir, e.name));
+      }
+    }
+    return budget.n;
+  };
+
+  // 优先 src/api（小而准），不够再扫 src（限 400 个文件）
+  const apiDir = path.join(projectRoot, 'src', 'api');
+  if (fs.existsSync(apiDir)) walk(apiDir, { n: 300 });
+  if (found.size < 3 && fs.existsSync(path.join(projectRoot, 'src'))) {
+    walk(path.join(projectRoot, 'src'), { n: 400 });
+  }
+
+  return [...found.entries()]
+    .sort((a, b) => b[1].score - a[1].score)
+    .slice(0, 5)
+    .map(([p, v]) => ({ path: p, method: v.method }));
+}
+
+// 综合探测：返回完整 tokenConfig，或 null（探不到就完全隐藏 token 区）
+function detectTokenConfig(projectRoot) {
+  const fromEnv = detectBackendFromEnv(projectRoot);
+  const fromSrc = detectBackendFromSrc(projectRoot);
+  const found = fromEnv || fromSrc;
+  if (!found) return null;
+  const candidates = inferCheckPathCandidates(projectRoot);
+  const cfg = {
+    testBackend: found.backend,
+    loginUrl: found.backend + '/login',
+    cookieName: 'token',
+    checkPath: candidates.length ? candidates[0].path : '',
+    checkMethod: candidates.length ? candidates[0].method : 'GET',
+    // 候选列表：checkPath 校验失败（404/405）时按序换下一个试，试通的记住
+    checkPathCandidates: candidates,
+    autoDetected: true,
+    source: found.source
+  };
+  return cfg;
+}
 
 function parseCookies(header) {
   const out = {};
@@ -90,41 +276,50 @@ function parseCookies(header) {
   return out;
 }
 
-// 真校验 token：发到测试后端 dashboard，401/402 = 失效，业务码成功 = 有效。
+// 真校验 token：用通用 Bearer 头请求 checkPath，401/402 = 失效。
+// 业务码判断放宽：code===0 / '0' / '00000' / success===true 都算成功。
 function verifyToken(token, cfg) {
   const https = require('https');
   return new Promise(resolve => {
     if (!token || token.length < 8) { resolve({ ok: false, code: 0, msg: 'token 太短' }); return; }
-    const url = new URL(cfg.testBackend + cfg.checkPath);
+    if (!cfg.checkPath) { resolve({ ok: false, code: 0, msg: '未配置校验路径（请在下方填入一个需要登录的接口路径，如 /api/user/info）' }); return; }
+    let url;
+    try { url = new URL(cfg.testBackend + cfg.checkPath); }
+    catch { resolve({ ok: false, code: 0, msg: '后端地址或校验路径格式错误' }); return; }
     const req = https.request(url, {
-      method: cfg.checkMethod || 'POST',
+      method: cfg.checkMethod || 'GET',
       headers: {
         'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json',
-        'x-clientType-header': 'pc',
-        'x-header-host': url.host
+        'Accept': 'application/json'
       }
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
         const code = res.statusCode;
-        if (code === 401 || code === 402) { resolve({ ok: false, code, msg: 'token 已失效（后端拒绝）' }); return; }
-        try {
-          const body = JSON.parse(raw);
-          const bizOk = body && (body.code === '00000' || body.code === 0 || body.code === '0');
-          if (bizOk) {
-            const u = (body.data && body.data.user) || {};
-            const t = (body.data && body.data.tenantEdition) || {};
-            resolve({ ok: true, username: u.username || '（未知）', tenantName: t.corpName || t.company || t.tenantName || '（未知）' });
-          } else {
-            resolve({ ok: false, code: body && body.code, msg: body && body.msg || '后端业务码非成功' });
+        if (code === 401 || code === 402 || code === 403) { resolve({ ok: false, code, msg: 'token 已失效（后端拒绝）' }); return; }
+        if (code >= 200 && code < 300) {
+          // 2xx：尝试解析看业务码
+          try {
+            const body = JSON.parse(raw);
+            const bizOk = body && (body.code === 0 || body.code === '0' || body.code === '00000' || body.success === true || body.ok === true || body.status === 0);
+            resolve({
+              ok: !!bizOk,
+              code: body && body.code,
+              msg: bizOk ? 'token 有效' : (body && body.msg || '后端业务码非成功'),
+              username: (body && body.data && (body.data.username || body.data.nickname || body.data.name)) || ''
+            });
+          } catch {
+            // 2xx 但非 JSON：token 本身是被接受的（后端只是返回了 HTML/空），算有效
+            resolve({ ok: true, msg: 'token 有效（后端返回非 JSON）' });
           }
-        } catch { resolve({ ok: false, code, msg: '后端返回非 JSON（可能这个接口路径不对，请在配置里改 checkPath）' }); }
+          return;
+        }
+        resolve({ ok: false, code, msg: `后端返回 ${code}（可能 checkPath 不对，或跨域/路由未命中）` });
       });
     });
     req.on('error', err => resolve({ ok: false, code: -1, msg: '网络错误：' + err.message }));
-    req.write('{}');
+    if ((cfg.checkMethod || 'GET').toUpperCase() !== 'GET') req.write('{}');
     req.end();
   });
 }
@@ -202,6 +397,14 @@ body{margin:0;font-family:"ZCOOL KuaiLe",-apple-system,"PingFang SC",sans-serif;
 .author .atext{font-size:13px;color:var(--text-2);line-height:1.6;font-family:-apple-system,sans-serif}
 .author .atext a{color:var(--primary);text-decoration:none}
 .modal-close{position:absolute;top:14px;right:18px;background:none;border:none;font-size:24px;color:var(--text-3);cursor:pointer}
+.tk-detected{font-size:12px;color:var(--primary-d);background:var(--primary-bg);padding:8px 12px;border-radius:8px;margin-bottom:12px;font-family:-apple-system,sans-serif;line-height:1.6}
+.tk-detected code{background:rgba(124,58,237,.15);padding:1px 5px;border-radius:4px}
+.tk-cfg{background:var(--bg);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-family:-apple-system,sans-serif}
+.tk-cfg summary{cursor:pointer;font-size:13px;color:var(--text-2);user-select:none}
+.tk-cfg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px}
+.tk-cfg-grid label{display:flex;flex-direction:column;font-size:11px;color:var(--text-3);gap:4px}
+.tk-cfg-grid input,.tk-cfg-grid select{padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--card);color:var(--text);font-family:inherit}
+.tk-cfg-grid input:focus,.tk-cfg-grid select:focus{outline:none;border-color:var(--primary)}
 </style></head><body>
 <div class="hd"><div class="hd-top">
   <div><h1>${escapeHtml(projectName)} · 开发导航</h1>
@@ -210,24 +413,7 @@ body{margin:0;font-family:"ZCOOL KuaiLe",-apple-system,"PingFang SC",sans-serif;
 </div></div>
 <div class="wrap">
 
-<div class="tk">
-  <h2>本地登录态（注入 token）</h2>
-  <div class="desc">
-    <b>原理</b>：很多后台项目（企微/CRM 类）在 <code>127.0.0.1</code> 上无法扫码登录，需要从测试环境「搬」token 过来。<br>
-    token 写进 cookie 后，<code>${devBaseUrl}</code> 的项目立即获得登录态（cookie 同 <code>127.0.0.1</code> 不分端口）。<br>
-    这是<b>真实鉴权</b>（非绕过）——请求带 <code>Authorization: Bearer &lt;token&gt;</code> 去后端真校验，失效就 401。<br>
-    <b>怎么拿 token</b>：打开 <a href="${tc.loginUrl}" target="_blank">${tc.loginUrl}</a> 登录 → F12 → Application → Cookies → 复制 <code>${tc.cookieName}</code> 的值 → 粘贴到下面 → 点「应用 token」。
-    <br><br><b>不需要登录态的项目请忽略此区域</b>，直接点下面的路由即可。
-  </div>
-  <div class="tk-row">
-    <input type="text" id="tokenInput" placeholder="把从 ${tc.testBackend} 复制的 ${tc.cookieName} 粘贴到这里…" autocomplete="off">
-    <button class="btn btn-pri" id="btnApply">应用 token</button>
-    <button class="btn btn-ghost" id="btnCheck">重新校验</button>
-    <button class="btn btn-danger" id="btnClear">清除</button>
-  </div>
-  <div class="tk-status" id="tkStatus"></div>
-  <div class="tk-meta" id="tkMeta"></div>
-</div>
+${tokenBlock(tc, hasCookieToken)}
 
 ${blocks || '<div class="no-match" style="display:block">没扫到路由（可能路由不在 src/router 下）。直接打开首页吧。</div>'}
 <div class="no-match" id="noMatch">没找到匹配的路由</div>
@@ -253,41 +439,60 @@ ${blocks || '<div class="no-match" style="display:block">没扫到路由（可�
   </div>
 </div>
 <script>
+const TOKEN_ENABLED = ${tc ? 'true' : 'false'};
 const HAS_TOKEN = ${hasCookieToken ? 'true' : 'false'};
-const TEST_BACKEND = ${JSON.stringify(tc.testBackend)};
 const el = id => document.getElementById(id);
-function show(kind, html){ el('tkStatus').className='tk-status '+kind; el('tkStatus').innerHTML=html; }
-function meta(html){ el('tkMeta').innerHTML=html; }
-function fmtTime(){ return new Date().toLocaleTimeString('zh-CN',{hour12:false}); }
 
-async function applyToken(){
-  const token = el('tokenInput').value.trim();
-  if(!token){ show('err','⚠ 请先粘贴 token'); return; }
-  show('info','正在写入 cookie 并校验…');
-  try{
-    const r = await fetch('/api/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+if (TOKEN_ENABLED) {
+  function show(kind, html){ el('tkStatus').className='tk-status '+kind; el('tkStatus').innerHTML=html; }
+  function meta(html){ el('tkMeta').innerHTML=html; }
+  function fmtTime(){ return new Date().toLocaleTimeString('zh-CN',{hour12:false}); }
+
+  async function applyToken(){
+    const token = el('tokenInput').value.trim();
+    if(!token){ show('err','⚠ 请先粘贴 token'); return; }
+    show('info','正在写入 cookie 并校验…');
+    try{
+      const r = await fetch('/api/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+      const j = await r.json();
+      if(!j.ok){ show('err','✗ 写入失败：'+(j.msg||'')); return; }
+      const c = await fetch('/api/token-check',{method:'GET'});
+      const cj = await c.json();
+      if(cj.ok){ show('ok','✓ 登录态已建立'+(cj.username?('：'+cj.username):'')); meta('上次校验：'+fmtTime()+' · token 有效，现在可以点路由进入页面。'); }
+      else { show('err','✗ cookie 已写但 token 校验失败：'+(cj.msg||'')); meta('上次校验：'+fmtTime()+' · '+((cj.code===401||cj.code===402)?'token 已过期，请重新复制。':'请确认 token 和「校验接口路径」是否正确。')); }
+    }catch(e){ show('err','✗ '+e.message); }
+  }
+  async function checkToken(){
+    show('info','校验中…');
+    const r = await fetch('/api/token-check');
     const j = await r.json();
-    if(!j.ok){ show('err','✗ 写入失败：'+(j.msg||'')); return; }
-    const c = await fetch('/api/token-check',{method:'GET'});
-    const cj = await c.json();
-    if(cj.ok){ show('ok','✓ 登录态已建立：'+(cj.username||'')+' @ '+(cj.tenantName||'')); meta('上次校验：'+fmtTime()+' · token 有效，现在可以点路由进入页面。'); }
-    else { show('err','✗ cookie 已写但 token 校验失败：'+(cj.msg||'')); meta('上次校验：'+fmtTime()+' · '+((cj.code===401||cj.code===402)?'token 已过期，请重新复制。':'请确认 token 正确。')); }
-  }catch(e){ show('err','✗ '+e.message); }
+    if(j.ok){ show('ok','✓ token 有效'+(j.username?('：'+j.username):'')); meta('上次校验：'+fmtTime()); }
+    else { show('err','✗ '+ (j.msg||'未登录')); meta('上次校验：'+fmtTime()+' · '+(j.code===401?'token 已过期':'请先粘贴 token，或检查校验路径')); }
+  }
+  async function clearToken(){
+    if(!confirm('确定清除本地 token cookie 吗？')) return;
+    await fetch('/api/token',{method:'DELETE'});
+    show('info','已清除'); meta(''); el('tokenInput').value='';
+  }
+  async function saveCfg(){
+    const cfg = {
+      testBackend: el('cfgBackend').value.trim(),
+      loginUrl: el('cfgLoginUrl').value.trim(),
+      cookieName: el('cfgCookieName').value.trim() || 'token',
+      checkPath: el('cfgCheckPath').value.trim(),
+      checkMethod: el('cfgCheckMethod').value
+    };
+    try{
+      const r = await fetch('/api/token-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+      const j = await r.json();
+      if(j.ok){ show('ok','✓ 配置已保存，刷新页面生效'); setTimeout(()=>location.reload(), 600); }
+      else { show('err','✗ 保存失败：'+(j.msg||'')); }
+    }catch(e){ show('err','✗ '+e.message); }
+  }
+  el('btnApply').onclick=applyToken; el('btnCheck').onclick=checkToken; el('btnClear').onclick=clearToken;
+  var btnSaveCfg = el('btnSaveCfg'); if(btnSaveCfg) btnSaveCfg.onclick=saveCfg;
+  if(HAS_TOKEN) checkToken(); else { show('','未注入 token（需要登录态的项目请按上方步骤粘贴）'); }
 }
-async function checkToken(){
-  show('info','校验中…');
-  const r = await fetch('/api/token-check');
-  const j = await r.json();
-  if(j.ok){ show('ok','✓ token 有效：'+(j.username||'')+' @ '+(j.tenantName||'')); meta('上次校验：'+fmtTime()); }
-  else { show('err','✗ '+ (j.msg||'未登录')); meta('上次校验：'+fmtTime()+' · '+(j.code===401?'token 已过期':'请先粘贴 token')); }
-}
-async function clearToken(){
-  if(!confirm('确定清除本地 token cookie 吗？')) return;
-  await fetch('/api/token',{method:'DELETE'});
-  show('info','已清除'); meta(''); el('tokenInput').value='';
-}
-el('btnApply').onclick=applyToken; el('btnCheck').onclick=checkToken; el('btnClear').onclick=clearToken;
-if(HAS_TOKEN) checkToken(); else { show('','未注入 token（需要登录态的项目请按上方步骤粘贴）'); }
 
 // 搜索过滤路由
 var sinput = document.getElementById('search');
@@ -321,44 +526,98 @@ document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeAb
 </body></html>`;
 }
 
-// 启动导航 server。tokenConfig 可选（覆盖默认的后端地址/登录页/cookie名/校验路径）。
-function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, tokenConfig }) {
+// 启动导航 server。
+// tokenConfig：用户已保存的配置（来自 store）。若为 null 则自动探测项目代码。
+//   - 自动探测到 → 显示 token 区，标记 autoDetected，用户可改后保存
+//   - 探测不到 → 不显示 token 区（对不需要登录态的项目零干扰）
+// onSaveConfig：用户在 UI 改配置后回调，由 main 写回 store（持久化）。
+function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, tokenConfig, onSaveConfig }) {
   const log = (...a) => { try { (onLog || console.log)(...a); } catch {} };
   const routes = scanRoutes(projectRoot);
   log(`[nav] 扫描到 ${routes.length} 个路由`);
-  const tc = { ...DEFAULT_TOKEN_CONFIG, ...(tokenConfig || {}) };
+
+  // 合并配置：用户保存的 > 自动探测的。两者都没有 = null（不显示 token 区）
+  // 防护1：用户保存了空对象（testBackend 为空）→ 当作未配置，重新探测
+  // 防护2：用户保存时留空的字段（尤其 checkPath）→ 回填本次自动探测值，
+  //        避免早期保存的旧配置（checkPath 空）永远压住新的探测结果
+  const auto = detectTokenConfig(projectRoot);
+  let tc;
+  if (tokenConfig && tokenConfig.testBackend) {
+    tc = { ...(auto || {}), ...tokenConfig };
+    if (!tc.checkPath && auto && auto.checkPath) tc.checkPath = auto.checkPath;
+    if (!tc.checkPathCandidates || !tc.checkPathCandidates.length) {
+      if (auto && auto.checkPathCandidates) tc.checkPathCandidates = auto.checkPathCandidates;
+    }
+  } else {
+    tc = auto;
+  }
+  if (tc) log(`[nav] token 配置来源：${tc.autoDetected ? '自动探测（' + (tc.source || '') + '）' : '用户保存'} → ${tc.testBackend}${tc.checkPath ? '，校验路径 ' + tc.checkPath : ''}`);
 
   const server = http.createServer(async (req, res) => {
     const url = (req.url || '/').split('?')[0];
     const cookies = parseCookies(req.headers.cookie);
+    const cookieName = tc ? (tc.cookieName || 'token') : 'token';
 
     if (url === '/' || url === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
-      res.end(renderDevNav(projectName, devBaseUrl, routes, tc, !!cookies[tc.cookieName]));
+      res.end(renderDevNav(projectName, devBaseUrl, routes, tc, !!(tc && cookies[cookieName])));
       return;
     }
-    // token 写入
-    if (url === '/api/token' && req.method === 'POST') {
-      const raw = await new Promise(r => { let b=''; req.on('data',c=>b+=c); req.on('end',()=>r(b)); });
-      let parsed; try { parsed = JSON.parse(raw); } catch { res.writeHead(400); res.end('{"ok":false,"msg":"非 JSON"}'); return; }
-      const token = parsed && parsed.token;
-      if (!token || typeof token !== 'string' || token.length < 8) {
-        res.writeHead(400, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"msg":"token 不合法"}'); return;
+
+    // 以下 token 相关接口，仅当 tc 存在时才有意义
+    if (!tc) {
+      if (url.startsWith('/api/token')) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"msg":"本项目未启用 token 注入"}'); return; }
+    } else {
+      // token 写入
+      if (url === '/api/token' && req.method === 'POST') {
+        const raw = await new Promise(r => { let b=''; req.on('data',c=>b+=c); req.on('end',()=>r(b)); });
+        let parsed; try { parsed = JSON.parse(raw); } catch { res.writeHead(400); res.end('{"ok":false,"msg":"非 JSON"}'); return; }
+        const token = parsed && parsed.token;
+        if (!token || typeof token !== 'string' || token.length < 8) {
+          res.writeHead(400, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"msg":"token 不合法"}'); return;
+        }
+        res.setHeader('Set-Cookie', `${cookieName}=${encodeURIComponent(token)}; Path=/; Max-Age=604800; SameSite=Lax`);
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return;
       }
-      res.setHeader('Set-Cookie', `${tc.cookieName}=${encodeURIComponent(token)}; Path=/; Max-Age=604800; SameSite=Lax`);
-      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return;
-    }
-    // token 校验
-    if (url === '/api/token-check' && req.method === 'GET') {
-      const token = cookies[tc.cookieName] ? decodeURIComponent(cookies[tc.cookieName]) : '';
-      if (!token) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"code":0,"msg":"本地无 token cookie"}'); return; }
-      const result = await verifyToken(token, tc);
-      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(result)); return;
-    }
-    // token 清除
-    if (url === '/api/token' && req.method === 'DELETE') {
-      res.setHeader('Set-Cookie', `${tc.cookieName}=; Path=/; Max-Age=0`);
-      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return;
+      // token 校验（带候选路径轮试：checkPath 404/405 时按探测候选换下一个，试通自动记住）
+      if (url === '/api/token-check' && req.method === 'GET') {
+        const token = cookies[cookieName] ? decodeURIComponent(cookies[cookieName]) : '';
+        if (!token) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"code":0,"msg":"本地无 token cookie"}'); return; }
+        let result = await verifyToken(token, tc);
+        const pathWrong = (r) => r && !r.ok && (r.code === 404 || r.code === 405 ||
+          /未配置校验路径|可能 checkPath 不对/.test(r.msg || ''));
+        if (pathWrong(result)) {
+          const candidates = (tc.checkPathCandidates || [])
+            .filter(c => c && c.path && c.path !== tc.checkPath);
+          for (const c of candidates) {
+            const tryCfg = { ...tc, checkPath: c.path, checkMethod: c.method || 'GET' };
+            const r2 = await verifyToken(token, tryCfg);
+            if (!pathWrong(r2)) {
+              result = { ...r2, msg: (r2.msg || '') + `（自动换用校验路径 ${c.path}，已记住）` };
+              // 试通的路径写回配置并持久化，下次直接用
+              tc = { ...tc, checkPath: c.path, checkMethod: c.method || 'GET' };
+              try { if (onSaveConfig) onSaveConfig(tc); } catch {}
+              log(`[nav] 校验路径自动命中：${c.path}（${c.method || 'GET'}）`);
+              break;
+            }
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(result)); return;
+      }
+      // token 清除
+      if (url === '/api/token' && req.method === 'DELETE') {
+        res.setHeader('Set-Cookie', `${cookieName}=; Path=/; Max-Age=0`);
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return;
+      }
+      // 配置保存（用户在 UI 改了后端/cookie/路径后点保存）
+      if (url === '/api/token-config' && req.method === 'POST') {
+        const raw = await new Promise(r => { let b=''; req.on('data',c=>b+=c); req.on('end',()=>r(b)); });
+        let parsed; try { parsed = JSON.parse(raw); } catch { res.writeHead(400); res.end('{"ok":false,"msg":"非 JSON"}'); return; }
+        // 更新运行时 tc，并回调 main 持久化
+        tc = { ...tc, ...parsed, autoDetected: false };
+        try { if (onSaveConfig) onSaveConfig(tc); } catch (e) { log('[nav] 保存配置回调失败：' + e.message); }
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return;
+      }
     }
     res.writeHead(404); res.end('Not Found');
   });
@@ -374,4 +633,4 @@ function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, token
   });
 }
 
-module.exports = { createDevNavServer, scanRoutes, extractRoutes };
+module.exports = { createDevNavServer, scanRoutes, extractRoutes, detectTokenConfig };
