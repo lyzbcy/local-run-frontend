@@ -99,7 +99,8 @@ function tokenBlock(tc, hasCookieToken) {
     <button class="btn btn-ghost" id="btnSaveCfg" style="margin-top:8px">保存配置</button>
   </details>
   <div class="desc" style="margin-top:14px;margin-bottom:8px">
-    <b>怎么拿 token</b>：打开 <a href="${escapeHtml(tc.loginUrl || tc.testBackend)}" target="_blank">${escapeHtml(tc.loginUrl || tc.testBackend)}</a> 登录 → F12 → Application → Cookies → 复制 <code>${escapeHtml(tc.cookieName || 'token')}</code> 的值 → 粘贴到下面 → 点「应用 token」。
+    <b>怎么拿 token（推荐方法）</b>：打开 <a href="${escapeHtml(tc.loginUrl || tc.testBackend)}" target="_blank">${escapeHtml(tc.loginUrl || tc.testBackend)}</a> 并登录 → F12 → <b>Network（网络）</b> → 刷新页面随便点一个接口请求 → <b>Request Headers（请求标头）</b> → 找 <code>authorization: Bearer xxx</code> → 复制 Bearer 后面那整串 → 粘贴到下面。<br>
+    <span style="color:var(--text-3)">（不推荐从 Application → Cookies 复制：那里可能有多条同名/过期的 cookie，容易拿错。若用 Network 方法仍提示失效，说明你复制的值确实过期了，重新登录后再取。）</span>
   </div>
   <div class="tk-row">
     <input type="text" id="tokenInput" placeholder="把从 ${escapeHtml(tc.testBackend || '后端')} 复制的 ${escapeHtml(tc.cookieName || 'token')} 粘贴到这里…" autocomplete="off">
