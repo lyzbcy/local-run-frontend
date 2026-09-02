@@ -241,6 +241,76 @@ function inferCheckPathCandidates(projectRoot) {
     .map(([p, v]) => ({ path: p, method: v.method }));
 }
 
+// 从项目源码推断「自定义请求头」——校验 token 时必须复刻 app 真实请求的头，
+// 否则后端网关（BFF 类常见：要求 x-clientType 之类的客户端标识）会拒绝校验请求，
+// 把有效 token 误判成过期（真实踩坑：demo-admin 缺 x-clientType-header 一律 401）。
+// 证据式扫描：headers['x-xxx'] = EXPR / setRequestHeader('x-xxx', EXPR) / 'x-xxx': EXPR。
+// 值是字面量直接用；是变量则跨文件解析 <变量名>: '字面量'（如 CLIENT_INFO → 'pc'）；
+// 解析不了的（随机数/函数调用，如 x-requestMsgId-header）跳过。
+// 返回 { 'x-xxx': 'value' }，扫不到返回 {}。
+function inferCustomHeaders(projectRoot) {
+  const headers = new Map(); // name -> value 表达式
+  let allText = []; // 收集源码文本，供变量解析
+  const HEADER_RE = /(?:headers\[\s*['"]([xX][\w-]+)['"]\s*\]\s*=\s*|setRequestHeader\(\s*['"]([xX][\w-]+)['"]\s*,\s*|['"]([xX][\w-]+)['"]\s*:\s*)([^;\n\r}]+)/g;
+
+  const scanFile = (abs) => {
+    let txt;
+    try { txt = fs.readFileSync(abs, 'utf8'); } catch { return; }
+    if (txt.length > 512 * 1024) txt = txt.slice(0, 512 * 1024);
+    allText.push(txt);
+    let m;
+    HEADER_RE.lastIndex = 0;
+    while ((m = HEADER_RE.exec(txt))) {
+      const name = (m[1] || m[2] || m[3] || '').toLowerCase();
+      if (!name || name === 'x-requestid' || /msgid|traceid|correlation/i.test(name)) continue; // 随机值头无意义
+      if (!headers.has(name)) headers.set(name, m[4].trim());
+    }
+  };
+
+  const walk = (dir, budget) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (budget.n <= 0) return;
+      if (e.isDirectory()) {
+        if (EXCLUDE_DIR.has(e.name) || e.name.startsWith('.')) continue;
+        walk(path.join(dir, e.name), budget);
+      } else if (e.isFile() && /\.(ts|js|mjs|jsx|tsx|vue)$/.test(e.name)) {
+        budget.n--;
+        scanFile(path.join(dir, e.name));
+      }
+    }
+  };
+  // 请求装配一般在 src/utils（requestService/axios 拦截器），不够再扫 src
+  walk(path.join(projectRoot, 'src', 'utils'), { n: 100 });
+  walk(path.join(projectRoot, 'src'), { n: 200 });
+
+  const resolveValue = (expr) => {
+    // 字面量
+    let lit = expr.match(/^['"]([^'"]{1,60})['"]$/);
+    if (lit) return lit[1];
+    // 变量：跨文件找 <变量名>: '字面量' 或 <变量名> = '字面量'
+    const ident = expr.match(/^([A-Za-z_$][\w$.]*)$/);
+    if (ident) {
+      const varName = ident[1].split('.').pop();
+      const re = new RegExp('\\b' + varName.replace(/\$/g, '\\$') + '\\s*[:=]\\s*[\'"]([\\w. -]{1,40})[\'"]');
+      for (const txt of allText) {
+        const mm = txt.match(re);
+        if (mm) return mm[1];
+      }
+    }
+    return null; // 模板串/表达式（随机值等）解析不了
+  };
+
+  const out = {};
+  let count = 0;
+  for (const [name, expr] of headers) {
+    const v = resolveValue(expr);
+    if (v && /^[\w.-]+$/.test(v)) { out[name] = v; if (++count >= 8) break; }
+  }
+  return out;
+}
+
 // 综合探测：返回完整 tokenConfig，或 null（探不到就完全隐藏 token 区）
 function detectTokenConfig(projectRoot) {
   const fromEnv = detectBackendFromEnv(projectRoot);
@@ -256,6 +326,8 @@ function detectTokenConfig(projectRoot) {
     checkMethod: candidates.length ? candidates[0].method : 'GET',
     // 候选列表：checkPath 校验失败（404/405）时按序换下一个试，试通的记住
     checkPathCandidates: candidates,
+    // 自定义请求头：校验时复刻 app 的真实请求头（BFF 网关常要求客户端标识）
+    customHeaders: inferCustomHeaders(projectRoot),
     autoDetected: true,
     source: found.source
   };
@@ -279,18 +351,24 @@ function parseCookies(header) {
 // 真校验 token：用通用 Bearer 头请求 checkPath，401/402 = 失效。
 // 业务码判断放宽：code===0 / '0' / '00000' / success===true 都算成功。
 function verifyToken(token, cfg) {
-  const https = require('https');
   return new Promise(resolve => {
     if (!token || token.length < 8) { resolve({ ok: false, code: 0, msg: 'token 太短' }); return; }
     if (!cfg.checkPath) { resolve({ ok: false, code: 0, msg: '未配置校验路径（请在下方填入一个需要登录的接口路径，如 /api/user/info）' }); return; }
     let url;
     try { url = new URL(cfg.testBackend + cfg.checkPath); }
     catch { resolve({ ok: false, code: 0, msg: '后端地址或校验路径格式错误' }); return; }
-    const req = https.request(url, {
-      method: cfg.checkMethod || 'GET',
+    // 按协议选模块：后端可能是 http（本地 dev 后端很常见）或 https（远程测试环境）
+    const transport = url.protocol === 'http:' ? require('http') : require('https');
+    const method = (cfg.checkMethod || 'GET').toUpperCase();
+    // 请求头：Bearer + 项目自定义头（复刻 app 真实请求，BFF 网关常要求 x-clientType 之类客户端标识，
+    // 缺了会把有效 token 误判 401）+ POST 时的 JSON 声明
+    const req = transport.request(url, {
+      method,
       headers: {
         'Authorization': 'Bearer ' + token,
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        ...(method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
+        ...(cfg.customHeaders || {})
       }
     }, res => {
       let raw = '';
@@ -586,6 +664,26 @@ function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, token
         let result = await verifyToken(token, tc);
         const pathWrong = (r) => r && !r.ok && (r.code === 404 || r.code === 405 ||
           /未配置校验路径|可能 checkPath 不对/.test(r.msg || ''));
+        // 鉴权拒绝兜底：401/402/403 可能是缺自定义请求头（藏在 node_modules 请求库里，源码扫不到）。
+        // 补上 BFF 网关惯用的客户端标识头重试一次，成功则把生效的头持久化。
+        const authRejected = (r) => r && !r.ok && (r.code === 401 || r.code === 402 || r.code === 403);
+        if (authRejected(result)) {
+          let host = '';
+          try { host = new URL(tc.testBackend).host; } catch {}
+          const existing = tc.customHeaders && (tc.customHeaders['x-clienttype-header'] || tc.customHeaders['x-clientType-header']);
+          const compatHeaders = {
+            ...(tc.customHeaders || {}),
+            'x-clienttype-header': existing || 'pc',
+            ...(host ? { 'x-header-host': host } : {})
+          };
+          const r2 = await verifyToken(token, { ...tc, customHeaders: compatHeaders });
+          if (r2.ok) {
+            result = { ...r2, msg: (r2.msg || '') + '（已自动补齐客户端标识请求头）' };
+            tc = { ...tc, customHeaders: compatHeaders };
+            try { if (onSaveConfig) onSaveConfig(tc); } catch {}
+            log('[nav] 补齐自定义请求头后校验通过，已记住');
+          }
+        }
         if (pathWrong(result)) {
           const candidates = (tc.checkPathCandidates || [])
             .filter(c => c && c.path && c.path !== tc.checkPath);
