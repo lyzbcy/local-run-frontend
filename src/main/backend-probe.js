@@ -6,6 +6,10 @@
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const { detectTokenConfig } = require('./dev-nav');
+
+// 明显不是 API 后端的 URL（误报来源：Sentry sourcemap 前缀、仓库地址、文档站）
+const NON_BACKEND_RE = /gitlab\.|github\.|sentry|readme|\/docs?\/|\.md($|:)/i;
 
 // Vite loadEnv 的优先级：.env.[mode].local > .env.[mode] > .env.local > .env
 const ENV_FILES = [
@@ -48,6 +52,7 @@ function collectProxyTargets(root) {
   const seen = new Set();
   const push = (target, source) => {
     if (!target || !/^https?:\/\//i.test(target) && !/^[\w.-]+:\d+$/.test(target)) return;
+    if (NON_BACKEND_RE.test(target)) return; // Sentry sourcemap 前缀/仓库地址等不是后端
     if (seen.has(target)) return;
     seen.add(target);
     out.push({ target, source });
@@ -73,13 +78,11 @@ function collectProxyTargets(root) {
       if (!fs.existsSync(cfg)) continue;
       try {
         const txt = fs.readFileSync(cfg, 'utf8');
-        // target: 'http://xxx' 或 target: backendTarget（变量，跳过）
+        // target: 'http://xxx'，包括 target: env.VUE_X || 'http://xxx'（变量部分不含引号，天然被覆盖）。
+        // 注意：不再独立匹配任意 `|| 'url'`——那会把 Sentry sourcemap 前缀（gitlab 地址）误当后端（真实踩坑）。
         const re = /target\s*:\s*[^'"`\n]*['"`](https?:\/\/[^'"`\s]+)['"`]/g;
         let m;
         while ((m = re.exec(txt))) push(m[1], `${f} 的 proxy target`);
-        // env.VITE_XXX || 'fallback' 形式的兜底 URL 也算
-        const fb = txt.match(/[|]{2}\s*['"`](https?:\/\/[^'"`\s]+)['"`]/);
-        if (fb) push(fb[1], `${f} 的 fallback`);
       } catch {}
     }
   }
@@ -114,6 +117,8 @@ async function probeTarget(target, timeoutMs = 2500) {
 }
 
 // 主入口：解析 + 探测全部目标。永不 throw。
+// 有不可达的代理目标时，交叉验证 .env 里的 API 基址（token 探测识别的那个）是否直连可达——
+// 很多项目接口根本不走 vite proxy 而是直连 VUE_APP_BASE_URL，这种情况代理挂了不影响接口，不该吓用户。
 async function checkProjectBackends(root, log = () => {}) {
   const results = [];
   try {
@@ -122,6 +127,7 @@ async function checkProjectBackends(root, log = () => {}) {
       log('后端探测：未发现代理目标（纯前端项目或未配置 proxy），跳过');
       return results;
     }
+    const bad = [];
     for (const { target, source } of targets) {
       const r = await probeTarget(target);
       const item = { target, source, ...r };
@@ -129,7 +135,27 @@ async function checkProjectBackends(root, log = () => {}) {
       if (r.ok) {
         log(`后端探测：${target} 可达（${r.detail}，来自${source}）`);
       } else {
-        log(`⚠️ 后端探测：${target} 不可达（${r.detail}，来自${source}）——页面能打开但接口会失败`);
+        bad.push(item);
+      }
+    }
+    // 交叉验证：API 基址直连可达 → 豁免代理不可达的告警
+    if (bad.length) {
+      let api = null;
+      try { api = detectTokenConfig(root); } catch {}
+      const apiBase = api && api.testBackend;
+      if (apiBase && !bad.some(b => b.target.replace(/\/+$/, '') === apiBase)) {
+        const r = await probeTarget(apiBase, 3000);
+        if (r.ok) {
+          for (const b of bad) b.excused = true;
+          log(`后端探测：代理目标不可达，但 API 基址直连可达（${api.source} → ${apiBase}，HTTP ${r.detail || '可达'}）——接口走直连，不影响使用`);
+          results.push({ target: apiBase, source: `API 基址直连（${api.source}）`, ...r, direct: true });
+        }
+      }
+      // 没被豁免的才真正告警
+      for (const b of bad) {
+        if (!b.excused) {
+          log(`⚠️ 后端探测：${b.target} 不可达（${b.detail}，来自${b.source}）——页面能打开但接口会失败`);
+        }
       }
     }
   } catch (e) {
