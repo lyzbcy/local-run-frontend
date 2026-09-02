@@ -386,7 +386,11 @@ function verifyToken(token, cfg) {
               ok: !!bizOk,
               code: body && body.code,
               msg: bizOk ? 'token 有效' : (body && body.msg || '后端业务码非成功'),
-              username: (body && body.data && (body.data.username || body.data.nickname || body.data.name)) || ''
+              username: ((body && body.data && (
+                body.data.username || body.data.nickname || body.data.name ||
+                (body.data.user && (body.data.user.username || body.data.user.nickname || body.data.user.name)) ||
+                (body.data.userInfo && (body.data.userInfo.username || body.data.userInfo.nickname))
+              )) || '') + (((body && body.data && body.data.tenantEdition && (body.data.tenantEdition.corpName || body.data.tenantEdition.company)) || '') ? ' @ ' + ((body.data.tenantEdition.corpName || body.data.tenantEdition.company)) : '')
             });
           } catch {
             // 2xx 但非 JSON：token 本身是被接受的（后端只是返回了 HTML/空），算有效
