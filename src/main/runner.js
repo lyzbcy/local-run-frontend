@@ -212,7 +212,8 @@ async function startFramework(project, portRange, log, options = {}) {
   let backendWarnings = [];
   try {
     const results = await checkProjectBackends(project.path, log);
-    backendWarnings = results.filter(r => !r.ok).map(r =>
+    // excused = 已交叉验证 API 基址直连可达，代理不可达不影响接口，不再算警告
+    backendWarnings = results.filter(r => !r.ok && !r.excused).map(r =>
       `后端不可达 ${r.target}（${r.detail}，来自${r.source}）：页面能打开但接口会失败。请启动本地后端，或在 .env.development.local 里把代理目标指到可用环境`);
   } catch {}
 
