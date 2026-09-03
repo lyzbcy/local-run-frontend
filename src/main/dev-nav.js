@@ -667,11 +667,9 @@ function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, token
         const token = cookies[cookieName] ? decodeURIComponent(cookies[cookieName]) : '';
         if (!token) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"code":0,"msg":"本地无 token cookie"}'); return; }
         let result = await verifyToken(token, tc);
-        const pathWrong = (r) => r && !r.ok && (r.code === 404 || r.code === 405 ||
-          /未配置校验路径|可能 checkPath 不对/.test(r.msg || ''));
         // 鉴权拒绝兜底：401/402/403 可能是缺自定义请求头（藏在 node_modules 请求库里，源码扫不到）。
         // 补上 BFF 网关惯用的客户端标识头重试一次，成功则把生效的头持久化。
-        const authRejected = (r) => r && !r.ok && (r.code === 401 || r.code === 402 || r.code === 403);
+        const authRejected = (r) => r && !r.ok && ['401', '402', '403'].includes(String(r.code));
         if (authRejected(result)) {
           let host = '';
           try { host = new URL(tc.testBackend).host; } catch {}
@@ -689,13 +687,17 @@ function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, token
             log('[nav] 补齐自定义请求头后校验通过，已记住');
           }
         }
-        if (pathWrong(result)) {
+        // 候选路径轮试：只要「未能确认 token 有效」且不是明确的鉴权拒绝（401/402/403，
+        // 含 HTTP 200 + 业务码 401 登录超时），就按序换候选重试。后端某路径 5xx/服务器忙
+        // （HTTP 200 + 006001）不代表 token 失效，换下一个能真正验证 token 的接口。
+        if (!result.ok && !authRejected(result)) {
           const candidates = (tc.checkPathCandidates || [])
             .filter(c => c && c.path && c.path !== tc.checkPath);
           for (const c of candidates) {
             const tryCfg = { ...tc, checkPath: c.path, checkMethod: c.method || 'GET' };
             const r2 = await verifyToken(token, tryCfg);
-            if (!pathWrong(r2)) {
+            if (authRejected(r2)) break; // 候选也鉴权拒绝：token 确实无效，保留原结果
+            if (r2.ok) {
               result = { ...r2, msg: (r2.msg || '') + `（自动换用校验路径 ${c.path}，已记住）` };
               // 试通的路径写回配置并持久化，下次直接用
               tc = { ...tc, checkPath: c.path, checkMethod: c.method || 'GET' };
