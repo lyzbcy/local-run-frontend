@@ -159,12 +159,17 @@ async function diagnoseProject(name, root) {
 
 (async () => {
   const results = [];
-  const SEO = '~/工作/某公司/开发工作/源文件';
-  const MOB = '~/工作/某公司/学习/官网国际化-mobile/mobile-example-admin-feature-v1212583-首屏防闪修复';
-  if (fs.existsSync(SEO)) results.push(await diagnoseProject('SEO（某公司源文件）', SEO));
-  else console.log('跳过 SEO：路径不存在');
-  if (fs.existsSync(MOB)) results.push(await diagnoseProject('MOBILE（国际化 mobile）', MOB));
-  else console.log('跳过 MOBILE：路径不存在');
+  // 真实项目路径不进仓库（隐私）：读 test/local-paths.js（已 gitignore）或环境变量
+  let local = {};
+  try { local = require('./local-paths.js'); } catch {}
+  const pairs = [
+    ['SEO', local.seoProj || process.env.LRF_DIAG_SEO],
+    ['MOBILE', local.mobileProj || process.env.LRF_DIAG_MOBILE]
+  ];
+  for (const [name, dir] of pairs) {
+    if (dir && fs.existsSync(dir)) results.push(await diagnoseProject(name, dir));
+    else console.log(`跳过 ${name}：未配置本地路径`);
+  }
 
   console.log(`\n${'#'.repeat(70)}`);
   console.log(`# 汇总`);

@@ -33,3 +33,4 @@ userData/
 build/icon.iconset/
 build/*.icns
 !build/icon.icns
+test/local-paths.js

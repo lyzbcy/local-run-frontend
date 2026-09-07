@@ -19,24 +19,29 @@ function ok(name, cond, extra = '') {
 // ---- 1. detector ----
 console.log('\n[detector] 项目类型识别');
 
-// 静态项目（用 mobile-example 参考项目）
-const staticProj = '~/工作/某公司/学习/官网国际化-mobile/mobile-example-admin-feature-v1212583-首屏防闪修复';
-if (fs.existsSync(staticProj)) {
+// 真实参考项目路径不进仓库（隐私）：优先读 test/local-paths.js（已 gitignore），
+// 其次读环境变量 LRF_TEST_STATIC_PROJ / LRF_TEST_VITE_PROJ，都没有就跳过。
+function localPath(key, envName) {
+  try { const m = require('./local-paths.js'); if (m[key]) return m[key]; } catch {}
+  return process.env[envName] || null;
+}
+const staticProj = localPath('staticProj', 'LRF_TEST_STATIC_PROJ');
+if (staticProj && fs.existsSync(staticProj)) {
   const r = detect(staticProj);
   ok('static 项目识别为 static', r.type === 'static', `got ${r.type}`);
   ok('static 不需要启动命令', r.startCommand === null);
 } else {
-  console.log('  ⏭ 跳过 static（参考项目路径不存在）');
+  console.log('  ⏭ 跳过 static（未配置本地参考项目路径）');
 }
 
-// vite 项目（demo-admin 是 vite）
-const viteProj = '~/工作/某公司/学习/【AI】内部项目—文档检索能力需求-需求二：企微AI管家—分析增强/demo-admin';
-if (fs.existsSync(viteProj)) {
+// vite 项目
+const viteProj = localPath('viteProj', 'LRF_TEST_VITE_PROJ');
+if (viteProj && fs.existsSync(viteProj)) {
   const r = detect(viteProj);
   ok('vite 项目识别为 framework', r.framework === true, `got ${r.type}`);
   ok('vite 有启动命令', !!r.startCommand, `got ${r.startCommand}`);
 } else {
-  console.log('  ⏭ 跳过 vite（参考项目路径不存在）');
+  console.log('  ⏭ 跳过 vite（未配置本地参考项目路径）');
 }
 
 // 造一个临时 vite 项目

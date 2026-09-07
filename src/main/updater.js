@@ -75,6 +75,9 @@ async function verifyDownload(file, asset) {
     const hash = crypto.createHash('sha256');
     for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
     if ('sha256:' + hash.digest('hex') !== asset.digest) throw new Error('更新包校验失败，请重试');
+  } else {
+    // digest 缺失时不能静默跳过——校验是无条件的安全步骤，缺失即视为异常
+    throw new Error('更新包缺少 SHA256 校验信息（GitHub 未返回 digest），为安全起见已中止');
   }
 }
 function findApp(dir, depth = 0) {
@@ -113,7 +116,7 @@ async function performUpdate(repo, onProgress, options = {}) {
       child.unref();
       onProgress('done', '已打开新版安装向导，应用即将退出；请按向导完成安装。');
       setTimeout(() => { options.onBeforeExit?.(); app.quit(); }, 1200);
-      return;
+      return; // updating 有意不复位：安装向导接管后本实例即将退出
     }
     onProgress('extract', '正在解压…');
     const extracted = path.join(tmpDir, 'extracted');
@@ -127,6 +130,9 @@ async function performUpdate(repo, onProgress, options = {}) {
     await run('/usr/bin/osascript', ['-e', `do shell script ${JSON.stringify(script)} with administrator privileges`]);
     fs.rmSync(tmpDir, { recursive: true, force: true });
     onProgress('done', `已安装 v${version}，正在重启…`);
+    // 若 relaunch/exit 意外被拦（更新会话未真正结束），3s 后解锁 updating，避免"更新正在进行"死锁
+    const unlock = setTimeout(() => { updating = false; }, 3000);
+    if (unlock.unref) unlock.unref();
     setTimeout(() => {
       options.onBeforeExit?.();
       app.relaunch({ execPath: path.join(target, 'Contents', 'MacOS', '本地运行前端项目') });
