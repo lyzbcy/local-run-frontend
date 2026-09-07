@@ -2,24 +2,29 @@
 // runningInstances: Map<projectId, { kind, proc?, server?, port, baseUrl, navUrl, startedAt }>
 
 const net = require('net');
-const { spawn } = require('child_process');
-const { createPreviewServer, scanHtmlFiles } = require('./preview-server');
+const { spawn, execFileSync } = require('child_process');
+const path = require('path');
+const { createPreviewServer } = require('./preview-server');
 const { createDevNavServer } = require('./dev-nav');
 const { checkProjectBackends } = require('./backend-probe');
 const { detectNode } = require('./detect-node');
 
 const instances = new Map();
+const starting = new Map();
 
-// 探测端口是否空闲。
-// 关键：必须用 0.0.0.0（IPv4 any）探测——它能同时发现 IPv4-only 占用、IPv6 dual-stack 占用
-// （vite 绑 :: 时 dual-stack 会接管 IPv4）、以及 IPv6-only 占用。用 127.0.0.1 或 ::1 都会漏判。
-function isPortFree(port) {
-  return new Promise(resolve => {
-    const srv = net.createServer();
-    srv.once('error', () => resolve(false));
-    srv.once('listening', () => srv.close(() => resolve(true)));
-    srv.listen(port, '0.0.0.0');
-  });
+// Probe both wildcard and loopback addresses. macOS permits a wildcard bind
+// alongside an existing loopback listener, so one address alone misses conflicts.
+async function isPortFree(port) {
+  for (const host of ['0.0.0.0', '127.0.0.1', '::1', '::']) {
+    const free = await new Promise(resolve => {
+      const srv = net.createServer();
+      srv.once('error', error => resolve(['EAFNOSUPPORT','EADDRNOTAVAIL'].includes(error.code)));
+      srv.once('listening', () => srv.close(() => resolve(true)));
+      try { srv.listen({port, host, exclusive:true}); } catch { resolve(false); }
+    });
+    if (!free) return false;
+  }
+  return true;
 }
 
 async function findFreePort(start, end, prefer) {
@@ -33,27 +38,31 @@ async function findFreePort(start, end, prefer) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // 用 Electron 自带的 fetch（Node 20+ 全局 fetch）做健康检查
-async function waitHealthy(url, { timeout = 60000, interval = 1000, log }) {
+async function waitHealthy(url, { timeout = 60000, interval = 250, log, check = () => {} }) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
+    check();
+    let t;
     try {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 2500);
+      t = setTimeout(() => ctrl.abort(), 2500);
       const res = await fetch(url, { signal: ctrl.signal, redirect: 'manual' });
       clearTimeout(t);
       // 2xx/3xx 都算就绪；404 也算 server 起来了（首页路由可能不对，但 server OK）
-      if (res.status < 500) return true;
-    } catch {}
+      const healthy = res.status < 500;
+      await res.body?.cancel();
+      if (healthy) return true;
+    } catch {} finally { clearTimeout(t); }
+    check();
     await sleep(interval);
   }
   throw new Error(`健康检查超时：${url}`);
 }
 
 // 启动静态项目的内嵌预览 server。
-// 启动静态项目的内嵌预览 server。
 // findFreePort 已同时检查 IPv4+IPv6（vite 只绑 IPv6 的坑已堵），用它预选空闲端口；
 // 万一预选后 listen 仍 EADDRINUSE（竞态），顺延重试。
-async function startStatic(project, portRange, log) {
+async function startStatic(project, portRange, log, state) {
   let port = await findFreePort(portRange[0], portRange[1], project.port);
   let lastErr = null;
   for (let attempt = port; attempt <= portRange[1]; attempt = await findFreePort(attempt + 1, portRange[1])) {
@@ -62,9 +71,13 @@ async function startStatic(project, portRange, log) {
         root: project.path, projectName: project.name, port: attempt,
         routeAliases: project.routeAliases || {}, onLog: log
       });
+      state.server = server;
+      if (state.cancelled) throw new Error("启动已取消");
       const navUrl = `${baseUrl}/__nav__`;
       const homeUrl = `${baseUrl}/`;
-      await waitHealthy(homeUrl, { timeout: 15000, log });
+      await waitHealthy(homeUrl, { timeout: 15000, log, check: () => {
+        if (state.cancelled) throw new Error('启动已取消');
+      } });
       return { kind: 'static', server, proc: null, port: attempt, baseUrl, homeUrl, navUrl, startedAt: Date.now() };
     } catch (e) {
       lastErr = e;
@@ -79,14 +92,15 @@ async function startStatic(project, portRange, log) {
 }
 
 // 把用户配置的启动命令 + 指定端口，拼成正确的参数数组。
-// 关键：npm/yarn/pnpm run xxx 必须用 "--" 分隔，否则 --port 会被 npm 当成它自己的参数吞掉。
-function buildFrameworkArgs(cmd, port) {
+// npm 需要 -- 转发脚本参数；pnpm/yarn/npx 直接转发。只有 Vite 支持 strictPort。
+function buildFrameworkArgs(cmd, port, type = "vite") {
   const parts = cmd.split(/\s+/).filter(Boolean);
   const bin = parts[0];
   const args = parts.slice(1);
-  const portArgs = ['--port', String(port), '--strictPort'];
-  // npm/yarn/pnpm run <script> 需要用 -- 转发参数给脚本
-  if ((bin === 'npm' || bin === 'yarn' || bin === 'pnpm' || bin === 'npx') && !args.includes('--')) {
+  if (type === 'react-scripts') return args;
+  const portArgs = ['--port', String(port), ...(type === 'vite' ? ['--strictPort'] : [])];
+  // npm run <script> 需要用 -- 转发参数给脚本
+  if (bin === 'npm' && !args.includes('--')) {
     return [...args, '--', ...portArgs];
   }
   return [...args, ...portArgs];
@@ -100,20 +114,16 @@ function extractPortFromOutput(output) {
 }
 
 // 启动框架项目的 dev server（子进程）
-async function startFramework(project, portRange, log, options = {}) {
+async function startFramework(project, portRange, log, options = {}, state) {
   const preferPort = await findFreePort(portRange[0], portRange[1], project.port);
   const cmd = project.startCommand || 'npm run dev';
   const bin = cmd.split(/\s+/)[0];
-  const args = buildFrameworkArgs(cmd, preferPort);
+  const args = buildFrameworkArgs(cmd, preferPort, project.type || "generic-dev");
   log(`启动命令：${bin} ${args.join(' ')}`);
 
-  const env = { ...process.env };
-  // 删除 ELECTRON_RUN_AS_NODE（防子进程被当成 node 跑，导致 vite 等 CLI 行为异常）
-  delete env.ELECTRON_RUN_AS_NODE;
   // 拼 PATH：.app 双击时默认 PATH 极短，不含 nvm/volta。把探测到的 node binDir 放最前。
   // 关键兜底：调用方（如控制接口 /start）没传 nodeBinDir 时，这里自己探测——
   // 否则 PATH 里没有 npm，spawn 秒退，健康检查超时（真实踩坑：HTTP 接口启动失败而 UI 启动正常）。
-  const extraPaths = [];
   if (!options.nodeBinDir) {
     const node = detectNode();
     if (!node) {
@@ -122,17 +132,27 @@ async function startFramework(project, portRange, log, options = {}) {
     log(`[node] 自动探测：${node.version || '(版本未知)'} @ ${node.path}`);
     options = { ...options, nodeBinDir: node.binDir };
   }
-  if (options.nodeBinDir) extraPaths.push(options.nodeBinDir);
-  if (process.platform === 'darwin') extraPaths.push('/opt/homebrew/bin', '/usr/local/bin');
-  if (extraPaths.length) env.PATH = [...extraPaths, env.PATH || ''].join(':');
-
-  const proc = spawn(bin, args, {
-    cwd: project.path,
-    env,
-    shell: true,
-    detached: true, // 关键：让子进程独立成进程组，这样能 kill 整组（防孙进程孤儿）
-    stdio: ['ignore', 'pipe', 'pipe']
+  const env = buildEnvironment(process.env, options.nodeBinDir);
+  env.PORT = String(preferPort);
+  const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'PATH';
+  env[pathKey] = path.join(project.path, 'node_modules', '.bin') + path.delimiter + env[pathKey];
+  // Preserve the user's command quoting. Only append generated numeric port options.
+  const originalArgs = cmd.split(/\s+/).filter(Boolean).slice(1);
+  const appended = args.slice(originalArgs.length);
+  const command = cmd + (appended.length ? ' ' + appended.join(' ') : '');
+  if (state.cancelled) throw new Error('启动已取消');
+  const proc = spawn(command, [], {
+    cwd: project.path, env, shell: true, detached: process.platform !== 'win32',
+    windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
   });
+  state.proc = proc;
+  let processError = null;
+  proc.on('error', error => { processError = error; });
+  const checkProcess = () => {
+    if (state.cancelled) throw new Error('启动已取消');
+    if (processError) throw processError;
+    if (proc.exitCode !== null || proc.signalCode !== null) throw new Error(`启动进程已退出（code=${proc.exitCode}, signal=${proc.signalCode}）`);
+  };
 
   // 边收集输出边尝试抓真实端口。输出节流 + 噪音折叠，避免 IPC 洪泛（demo-admin 启动吐上百行 sass 警告会卡死渲染层）。
   let realPort = null;
@@ -159,7 +179,7 @@ async function startFramework(project, portRange, log, options = {}) {
     flushTimer = setTimeout(() => { flushTimer = null; flushLogs(false); }, FLUSH_MS);
   };
   const handleChunk = (s, tag) => {
-    buffer += s;
+    buffer = (buffer + s).slice(-32768);
     tryExtract();
     // 按行分类：噪音折叠，正常行累积
     for (const line of s.split(/\r?\n/)) {
@@ -180,18 +200,22 @@ async function startFramework(project, portRange, log, options = {}) {
   proc.stderr.on('data', d => handleChunk(d.toString(), 'dev!'));
   proc.on('exit', code => { flushLogs(true); log(`[dev] 进程退出 code=${code}`); });
 
-  // 等真实端口出现（dev server 会打印），最长 90s
-  const deadline = Date.now() + 90000;
-  while (!realPort && Date.now() < deadline && !proc.killed) {
-    await sleep(500);
+  // Probe the chosen port immediately; output matching is a fallback, not a 90s gate.
+  const deadline = Date.now() + 60000;
+  let port = preferPort;
+  while (true) {
+    checkProcess();
+    port = realPort ? parseInt(realPort, 10) : preferPort;
+    try {
+      await waitHealthy(`http://127.0.0.1:${port}/`, {timeout:1000, interval:150, log, check:checkProcess});
+      break;
+    } catch (error) {
+      checkProcess();
+      if (Date.now() >= deadline) throw error;
+    }
   }
-
-  // 端口确认：抓到用抓到的，否则退回期望端口（健康检查兜底）
-  const port = realPort ? parseInt(realPort, 10) : preferPort;
+  checkProcess();
   const homeUrl = `http://127.0.0.1:${port}/`;
-  flushLogs(true);
-  log(`健康检查：${homeUrl}`);
-  await waitHealthy(homeUrl, { timeout: 60000, log });
   flushLogs(true);
 
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -204,6 +228,7 @@ async function startFramework(project, portRange, log, options = {}) {
       tokenConfig: project.tokenConfig || null,
       onSaveConfig: options.onSaveConfig // main 提供，写回 store
     });
+    state.server = navServer.server;
     navUrl = navServer.navUrl;
   } catch (e) { log(`[nav] 启动失败（忽略，降级为首页）：${e.message}`); }
 
@@ -217,56 +242,79 @@ async function startFramework(project, portRange, log, options = {}) {
       `后端不可达 ${r.target}（${r.detail}，来自${r.source}）：页面能打开但接口会失败。请启动本地后端，或在 .env.development.local 里把代理目标指到可用环境`);
   } catch {}
 
+  checkProcess();
   return {
     kind: 'framework', server: navServer ? navServer.server : null, proc, port, baseUrl,
     homeUrl, navUrl, startedAt: Date.now(), backendWarnings
   };
 }
 
-async function startProject(project, portRange, log = () => {}, options = {}) {
-  if (instances.has(project.id)) {
-    return { ok: true, instance: instances.get(project.id), already: true };
+function buildEnvironment(source, nodeBinDir, platform = process.platform) {
+  const env = {...source};
+  delete env.ELECTRON_RUN_AS_NODE;
+  const pathKey = platform === 'win32' ? (Object.keys(env).find(k => k.toLowerCase() === 'path') || 'Path') : 'PATH';
+  const extra = [nodeBinDir, ...(platform === 'darwin' ? ['/opt/homebrew/bin', '/usr/local/bin'] : [])].filter(Boolean);
+  env[pathKey] = [...extra, env[pathKey] || ''].join(platform === 'win32' ? ';' : ':');
+  if (platform === 'win32') for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'path' && key !== pathKey) delete env[key];
   }
-  try {
-    const inst = project.framework
-      ? await startFramework(project, portRange, log, options)
-      : await startStatic(project, portRange, log);
-    instances.set(project.id, inst);
-    return { ok: true, instance: inst };
-  } catch (e) {
-    log(`[start] 失败: ${e.message}`);
-    return { ok: false, error: e.message };
+  return env;
+}
+
+function disposeInstance(inst) {
+  if (inst.server) { try { inst.server.closeAllConnections?.(); inst.server.close(); } catch {} }
+  if (!inst.proc || !inst.proc.pid) return;
+  const proc = inst.proc;
+  if (process.platform === 'win32') {
+    // Windows has no POSIX process groups; taskkill /T includes npm/cmd grandchildren.
+    try { execFileSync('taskkill.exe', ['/PID', String(proc.pid), '/T', '/F'], {windowsHide:true, stdio:'ignore', timeout:5000}); } catch {}
+  } else {
+    try { process.kill(-proc.pid, 'SIGTERM'); } catch { try { proc.kill('SIGTERM'); } catch {} }
+    const timer = setTimeout(() => {
+      try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
+    }, 1500);
+    timer.unref();
   }
 }
 
-function stopProject(projectId, log = () => {}) {
-  const inst = instances.get(projectId);
-  if (!inst) return { ok: true, already: true };
-  try {
-    if (inst.server) {
-      try { inst.server.close(); } catch {}
-    }
-    if (inst.proc && !inst.proc.killed) {
-      // 用进程组 kill：detached 启动的子进程是独立的进程组，kill(-pid) 杀整组
-      // 这能杀掉 shell 启动的 dev server 孙进程，防端口被占（vite/next 的常见坑）
-      try { process.kill(-inst.proc.pid, 'SIGTERM'); }
-      catch {
-        // 进程组 kill 失败（可能不是组长），退回普通 kill
-        try { inst.proc.kill('SIGTERM'); } catch {}
-      }
-      // 兜底强杀整组
-      setTimeout(() => {
-        try { process.kill(-inst.proc.pid, 'SIGKILL'); }
-        catch {
-          try { if (inst.proc && !inst.proc.killed) inst.proc.kill('SIGKILL'); } catch {}
+function startProject(project, portRange, log = () => {}, options = {}) {
+  if (starting.has(project.id)) return starting.get(project.id).promise;
+  if (instances.has(project.id)) return Promise.resolve({ok:true,instance:instances.get(project.id),already:true});
+  const state = {cancelled:false, proc:null, server:null};
+  // Defer actual work so the pending state exists before any async operation starts.
+  state.promise = Promise.resolve().then(async () => {
+    try {
+      if (state.cancelled) throw new Error('启动已取消');
+      const inst = project.framework
+        ? await startFramework(project, portRange, log, options, state)
+        : await startStatic(project, portRange, log, state);
+      if (state.cancelled) throw new Error('启动已取消');
+      instances.set(project.id, inst);
+      if (inst.proc) inst.proc.once('exit', () => {
+        if (instances.get(project.id) === inst) {
+          instances.delete(project.id);
+          disposeInstance(inst);
         }
-      }, 1500);
+      });
+      return {ok:true,instance:inst};
+    } catch (error) {
+      disposeInstance(state);
+      log(`[start] 失败: ${error.message}`);
+      return {ok:false,error:error.message};
+    } finally {
+      if (starting.get(project.id) === state) starting.delete(project.id);
     }
-  } catch (e) {
-    log(`[stop] ${e.message}`);
-  }
-  instances.delete(projectId);
-  return { ok: true };
+  });
+  starting.set(project.id, state);
+  return state.promise;
+}
+
+function stopProject(projectId, log = () => {}) {
+  const pending = starting.get(projectId);
+  if (pending) { pending.cancelled = true; disposeInstance(pending); }
+  const inst = instances.get(projectId);
+  if (inst) { instances.delete(projectId); disposeInstance(inst); }
+  return {ok:true,already:!inst && !pending};
 }
 
 function getStatus() {
@@ -287,7 +335,7 @@ function getStatus() {
 }
 
 function stopAll() {
-  for (const pid of [...instances.keys()]) stopProject(pid);
+  for (const pid of new Set([...instances.keys(), ...starting.keys()])) stopProject(pid);
 }
 
-module.exports = { startProject, stopProject, getStatus, stopAll, isPortFree, findFreePort, buildFrameworkArgs, extractPortFromOutput };
+module.exports = { startProject, stopProject, getStatus, stopAll, isPortFree, findFreePort, buildFrameworkArgs, extractPortFromOutput, buildEnvironment };

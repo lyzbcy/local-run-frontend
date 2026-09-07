@@ -1,45 +1,45 @@
-// 探测系统 node（框架项目启动需要）。
-// .app 双击启动时 PATH 很短，不含 nvm/volta 等，所以不能只靠 which，要扫所有常见安装位置。
-
+// Find a usable system Node installation on macOS and Windows, including GUI launches.
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-function detectNode() {
-  const home = process.env.HOME || '';
-  // 候选 node 路径（按优先级）。nvm 要展开版本目录，单独处理。
-  const candidates = [
-    '/opt/homebrew/bin/node',        // homebrew arm64
-    '/usr/local/bin/node',           // homebrew intel / 官方 pkg
-    '/usr/bin/node',                 // 系统自带
-    path.join(home, '.volta/bin/node'), // volta
-    path.join(home, '.fnm/aliases/default/bin/node') // fnm
-  ];
-  // nvm：可能有多个版本，取最新（目录名按版本号排序）
+function detectNode(options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  const exists = options.existsSync || fs.existsSync;
+  const execute = options.execFileSync || execFileSync;
+  const paths = platform === 'win32' ? path.win32 : path;
+  const home = env.USERPROFILE || env.HOME || '';
+  const candidates = [];
   try {
-    const nvmDir = path.join(home, '.nvm', 'versions', 'node');
-    if (fs.existsSync(nvmDir)) {
-      const versions = fs.readdirSync(nvmDir).filter(v => v.startsWith('v')).sort();
-      if (versions.length) candidates.push(path.join(nvmDir, versions[versions.length - 1], 'bin', 'node'));
-    }
+    const output = execute(platform === 'win32' ? 'where.exe' : 'which', ['node'], {
+      env, encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    candidates.push(...output.split(/\r?\n/).filter(Boolean));
   } catch {}
-  // 再试 which（万一 PATH 里就有）
-  try {
-    const which = execFileSync('which', ['node'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    if (which) candidates.unshift(which.split(/\r?\n/)[0]); // which 的优先
-  } catch {}
-
-  for (const p of candidates) {
-    if (p && fs.existsSync(p)) {
-      try {
-        const ver = execFileSync(p, ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-        return { path: p, version: ver, binDir: path.dirname(p) };
-      } catch {
-        return { path: p, version: null, binDir: path.dirname(p) };
-      }
+  if (platform === 'win32') {
+    for (const base of [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA]) {
+      if (base) candidates.push(paths.join(base, 'nodejs', 'node.exe'));
     }
+    if (env.NVM_SYMLINK) candidates.push(paths.join(env.NVM_SYMLINK, 'node.exe'));
+    if (env.VOLTA_HOME) candidates.push(paths.join(env.VOLTA_HOME, 'bin', 'node.exe'));
+    candidates.push(paths.join(home, 'AppData', 'Local', 'Volta', 'bin', 'node.exe'));
+  } else {
+    candidates.push('/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node',
+      paths.join(home, '.volta/bin/node'), paths.join(home, '.fnm/aliases/default/bin/node'));
+    try {
+      const nvmDir = paths.join(home, '.nvm', 'versions', 'node');
+      const versions = fs.readdirSync(nvmDir).filter(v => /^v\d/.test(v)).sort((a,b) => a.localeCompare(b, undefined, {numeric:true})).reverse();
+      candidates.push(...versions.map(v => paths.join(nvmDir, v, 'bin', 'node')));
+    } catch {}
+  }
+  for (const candidate of [...new Set(candidates)]) {
+    if (!candidate || !exists(candidate)) continue;
+    try {
+      const version = execute(candidate, ['--version'], {env, encoding:'utf8', timeout:3000, windowsHide:true, stdio:['ignore','pipe','ignore']}).trim();
+      if (/^v\d+\.\d+\.\d+/.test(version)) return {path:candidate,version,binDir:paths.dirname(candidate)};
+    } catch {} // An unusable candidate must not hide a later working installation.
   }
   return null;
 }
-
 module.exports = { detectNode };

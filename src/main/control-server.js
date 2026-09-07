@@ -1,3 +1,4 @@
+const { rejectUntrustedRequest } = require('./local-http-security');
 // AI-Agent 控制接口：一个独立的本地 HTTP server，让外部 AI Agent 能控制本软件。
 // 绑定 127.0.0.1，固定端口 47800。
 // 端点：
@@ -52,6 +53,7 @@ function createControlServer({ getStore, saveStore, startProject, stopProject, g
   }
 
   const server = http.createServer(async (req, res) => {
+    if (rejectUntrustedRequest(req, res)) return;
     const url = (req.url || '/').split('?')[0];
     try {
       if (req.method === 'GET' && url === '/status') {

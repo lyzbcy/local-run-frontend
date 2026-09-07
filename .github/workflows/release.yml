@@ -1,0 +1,85 @@
+name: Build and verify desktop release
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    branches: ['release/v0.4.0']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+            platform: mac
+          - os: macos-15-intel
+            arch: x64
+            platform: mac
+          - os: windows-latest
+            arch: x64
+            platform: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+          ELECTRON_CUSTOM_DIR: v{{ version }}
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+      - run: npm test
+      - name: Build native package
+        run: npx electron-builder --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+          ELECTRON_CUSTOM_DIR: v{{ version }}
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+      - name: Bundle Mac installer scripts
+        if: matrix.platform == 'mac'
+        run: npm run package:mac -- ${{ matrix.arch }}
+      - name: Install and launch shipped application
+        run: node test/smoke-native.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/local-run-frontend-v*.zip
+            release/local-run-frontend-v*.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/smoke-*.png
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: artifacts
+      - name: Verify complete set and create checksums
+        run: |
+          test "$(find artifacts -name '*.zip' | wc -l)" -eq 2
+          test "$(find artifacts -name '*.exe' | wc -l)" -eq 1
+          cd artifacts
+          sha256sum *.zip *.exe > SHA256SUMS.txt
+      - name: Create draft with verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* --draft --verify-tag --title "$GITHUB_REF_NAME" --notes 'macOS arm64/x64 and Windows x64. Awaiting final release verification.'
