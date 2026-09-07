@@ -105,8 +105,9 @@ function createWindow() {
     minHeight: 600,
     title: APP_NAME,
     backgroundColor: '#f5f7fa',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 18 },
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 18 } }
+      : { titleBarStyle: 'default' }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -409,9 +410,10 @@ ipcMain.handle('settings:save', async (_e, { settings }) => {
   const data = store.load();
   const merged = { ...data.settings, ...settings };
   // 校验端口区间
-  if (Array.isArray(merged.portRange) && merged.portRange.length === 2) {
-    const [s, e] = merged.portRange;
-    if (s >= e || s < 1024 || e > 65535) return { ok: false, error: '端口区间不合法（需 起始 < 结束，且在 1024-65535）' };
+  if (!Array.isArray(merged.portRange) || merged.portRange.length !== 2 ||
+      !merged.portRange.every(Number.isInteger) || merged.portRange[0] >= merged.portRange[1] ||
+      merged.portRange[0] < 1024 || merged.portRange[1] > 65535) {
+    return { ok: false, error: '端口区间不合法（需两个整数，起始 < 结束，且在 1024-65535）' };
   }
   store.save({ ...data, settings: merged });
   logger.info('设置已保存');
@@ -421,19 +423,20 @@ ipcMain.handle('settings:save', async (_e, { settings }) => {
 // 导入项目数据（合并：同路径跳过）
 ipcMain.handle('data:import', async (_e, { projects }) => {
   if (!Array.isArray(projects)) return { ok: false, error: '数据格式错误' };
-  const data = store.load();
+  let data = store.load();
   let added = 0, skipped = 0;
   for (const p of projects) {
-    if (!p.path) continue;
+    if (!p || typeof p.path !== 'string' || !p.path.trim()) { skipped++; continue; }
     const exists = (data.projects || []).find(x => x.path === p.path);
     if (exists) { skipped++; continue; }
     const { data: next } = store.addProject(data, {
       name: p.name, projectPath: p.path, type: p.type, startCommand: p.startCommand, framework: !!p.framework
     });
     Object.assign(next.projects[next.projects.length - 1], { favorite: !!p.favorite });
-    store.save(next);
+    data = next;
     added++;
   }
+  store.save(data);
   logger.ok(`导入完成：新增 ${added}，跳过（已存在）${skipped}`);
   refreshTrayCache();
   return { ok: true, added, skipped };

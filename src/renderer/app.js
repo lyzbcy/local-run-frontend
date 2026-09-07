@@ -446,7 +446,7 @@ function showDetectResult(r) {
     $('#cmdRow').style.display = 'none';
   } else {
     info.className = 'detect-info warn';
-    info.innerHTML = `⚠️ 没识别出项目类型。可选静态预览，或手动填启动命令（如 <b>npm run dev</b>）。`;
+    info.innerHTML = `⚠️ 没识别出项目类型。填写启动命令（如 <b>npm run dev</b>），或清空命令使用静态预览。`;
     $('#cmdRow').style.display = '';
     $('#addCmd').value = 'npm run dev';
   }
@@ -472,13 +472,14 @@ async function confirmAdd() {
   if (!picked) return;
   const name = $('#addName').value.trim() || picked.path.split(/[\\/]/).pop();
   const cmd = $('#addCmd').value.trim();
+  const framework = !!picked.framework || (picked.type === 'unknown' && !!cmd);
   const startNow = $('#addStartNow') && $('#addStartNow').checked;
   const r = await window.api.addProject({
     name,
     projectPath: picked.path,
     type: picked.type,
-    startCommand: picked.framework ? (cmd || picked.startCommand) : null,
-    framework: !!picked.framework
+    startCommand: framework ? (cmd || picked.startCommand) : null,
+    framework
   });
   if (!r.created) {
     toast('这个项目已经在列表里了', 'error');
@@ -687,10 +688,9 @@ function bindAgent() {
     const btn = $('#btnTestCtrl');
     btn.disabled = true; btn.textContent = '测试中…';
     try {
-      const r = await fetch('http://127.0.0.1:47800/', { method: 'GET' });
-      const j = await r.json();
-      if (j.ok) toast('✓ 连接成功，接口可用', 'success');
-      else toast('接口返回异常', 'error');
+      const status = await window.api.ctrlStatus();
+      if (status.ready) toast('✓ 控制接口已启动，可供本机 Agent 调用', 'success');
+      else toast('✗ 控制接口未启动：' + (status.error || '请稍后重试'), 'error');
     } catch (e) {
       toast('✗ 连接失败：' + e.message, 'error');
     }

@@ -1,6 +1,6 @@
 {
   "name": "local-run-frontend",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "本地运行前端项目 - 一键启动任意前端项目的桌面工具",
   "private": true,
   "main": "src/main/main.js",
@@ -8,7 +8,10 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac --arm64 --x64",
+    "test": "node scripts/run-tests.js",
+    "dist:win": "electron-builder --win --x64",
+    "package:mac": "node scripts/package-mac.js"
   },
   "author": "lyzbcy <lyzbcy@github.com>",
   "license": "MIT",
@@ -30,17 +33,32 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        {
-          "target": "dir",
-          "arch": [
-            "arm64"
-          ]
-        }
+        "dir"
       ],
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "identity": null,
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "minimumSystemVersion": "12.0"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "local-run-frontend-v${version}-win-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
     }
   },
   "devDependencies": {

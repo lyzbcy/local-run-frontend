@@ -1,3 +1,4 @@
+const { rejectUntrustedRequest } = require('./local-http-security');
 // 框架项目的开发导航服务：扫描 src/router 的路由定义，生成可点的目录页。
 // 复用 qv-admin/zeen-tools/dev-nav-server.js 的思路（正则抽 path/title）。
 // 启动一个独立的小 http server，页面里的链接指向 dev server 的真实端口。
@@ -637,6 +638,7 @@ function createDevNavServer({ projectRoot, projectName, devBaseUrl, onLog, token
   if (tc) log(`[nav] token 配置来源：${tc.autoDetected ? '自动探测（' + (tc.source || '') + '）' : '用户保存'} → ${tc.testBackend}${tc.checkPath ? '，校验路径 ' + tc.checkPath : ''}`);
 
   const server = http.createServer(async (req, res) => {
+    if (rejectUntrustedRequest(req, res)) return;
     const url = (req.url || '/').split('?')[0];
     const cookies = parseCookies(req.headers.cookie);
     const cookieName = tc ? (tc.cookieName || 'token') : 'token';

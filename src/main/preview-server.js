@@ -99,7 +99,7 @@ function renderNavPage(projectName, baseUrl, htmlFiles) {
   }
 
   const CAT_ICON = { '首页': '🏠', casePage: '📖', schemePage: '🛠️', page: '📄', common: '🧩' };
-  const sections = catOrder.filter(c => groups.get(c).length).map(cat => {
+  const sections = catOrder.filter(c => groups.has(c) && groups.get(c).length).map(cat => {
     const list = groups.get(cat);
     const icon = CAT_ICON[cat] || '📁';
     const cards = list.map(it => {
@@ -298,6 +298,12 @@ function scanBaseHrefs(root) {
 // routeAliases 形如 { '/m/case': '/casePage/caseIndex.html' }，来自 detector 或用户配置。
 function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog }) {
   const log = (...a) => { try { (onLog || console.log)(...a); } catch {} };
+  root = path.resolve(root);
+  const realRoot = fs.realpathSync(root);
+  const isWithin = (base, candidate) => {
+    const relative = path.relative(base, candidate);
+    return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep));
+  };
 
   // 启动时扫一次 <base href>，建显式映射表（替代猜测式 prefix-strip）
   const basePrefixes = scanBaseHrefs(root);
@@ -314,7 +320,17 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
   };
 
   const server = http.createServer((req, res) => {
-    let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+    // Prevent DNS rebinding, while allowing ordinary cross-origin static resources.
+    if (!/^(127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?$/i.test(req.headers.host || '')) {
+      res.writeHead(403); res.end('Forbidden'); return;
+    }
+    let urlPath;
+    try {
+      urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+      if (urlPath.includes('\0')) throw new Error('Invalid path');
+    } catch {
+      res.writeHead(400); res.end('Bad Request'); return;
+    }
 
     // 目录页注入
     if (urlPath === '/__nav__' || urlPath === '/__nav__/') {
@@ -337,9 +353,10 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
     let filePath = path.normalize(path.join(root, urlPath));
 
     // 防穿越
-    if (!filePath.startsWith(root)) {
+    if (!isWithin(root, filePath)) {
       res.writeHead(403); res.end('Forbidden'); return;
     }
+    if (!checkRealPath(filePath)) return;
 
     // 解析真实文件路径。先 stat，根据结果决定回退策略。
     fs.stat(filePath, (err, stats) => {
@@ -392,6 +409,7 @@ function createPreviewServer({ root, projectName, port, routeAliases = {}, onLog
 
     // --- 辅助：目录列表（类 nginx autoindex）---
     function serveDirListing(dirPath, reqPath) {
+      if (!checkRealPath(dirPath)) return;
       let entries;
       try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); }
       catch { return notFound(); }
@@ -424,6 +442,7 @@ a{color:#409eff;text-decoration:none}a:hover{text-decoration:underline}.path{col
     }
 
     function serveFile(fp) {
+      if (!checkRealPath(fp)) return;
       fs.readFile(fp, (e, content) => {
         if (e) return notFound();
         const ext = path.extname(fp).toLowerCase();
@@ -433,6 +452,20 @@ a{color:#409eff;text-decoration:none}a:hover{text-decoration:underline}.path{col
         });
         res.end(content);
       });
+    }
+
+    // Resolve symlinks before every file/listing read, including fallback index files.
+    function checkRealPath(fp) {
+      try {
+        if (!isWithin(realRoot, fs.realpathSync(fp))) {
+          res.writeHead(403); res.end('Forbidden'); return false;
+        }
+      } catch (e) {
+        if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') {
+          res.writeHead(404); res.end('Not Found'); return false;
+        }
+      }
+      return true;
     }
 
     function notFound() {
