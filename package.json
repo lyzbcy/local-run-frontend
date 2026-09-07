@@ -33,13 +33,36 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dir"
+        "dir",
+        "dmg"
       ],
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "identity": null,
       "icon": "build/icon.icns",
       "minimumSystemVersion": "12.0"
+    },
+    "dmg": {
+      "background": "build/dmg/background.png",
+      "title": "本地运行前端项目 ${version}",
+      "window": {
+        "width": 658,
+        "height": 498
+      },
+      "iconSize": 128,
+      "contents": [
+        {
+          "x": 110,
+          "y": 280,
+          "type": "file"
+        },
+        {
+          "x": 548,
+          "y": 280,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "win": {
       "target": [

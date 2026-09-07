@@ -26,13 +26,15 @@
 
 ### 方式一：下载 release（普通用户）
 
-v0.4.0 下载：
+v0.4.0 下载（**Mac 推荐 DMG**：双击打开，把应用图标拖进右侧 Applications 文件夹即可）：
 
-| 系统 | 下载 |
-|---|---|
-| macOS 12+，Apple 芯片 | [Mac arm64 ZIP](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-mac-arm64.zip) |
-| macOS 12+，Intel 芯片 | [Mac x64 ZIP](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-mac-x64.zip) |
-| Windows 10+，x64 | [Windows NSIS 安装 EXE](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-win-x64-setup.exe) |
+| 系统 | 推荐 | 备选（含安装脚本） |
+|---|---|---|
+| macOS 12+，Apple 芯片 | [Mac arm64 DMG](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-mac-arm64.dmg) | [arm64 ZIP](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-mac-arm64.zip) |
+| macOS 12+，Intel 芯片 | [Mac x64 DMG](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-mac-x64.dmg) | [x64 ZIP](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-mac-x64.zip) |
+| Windows 10+，x64 | — | [Windows NSIS 安装 EXE](https://github.com/lyzbcy/local-run-frontend/releases/download/v0.4.0/local-run-frontend-v0.4.0-win-x64-setup.exe) |
+
+> 应用未做开发者签名：Mac 首次打开若被拦，系统设置 → 隐私与安全性 → 「仍要打开」，或用应用内的「一键去除隔离」引导；Windows SmartScreen 选「仍要运行」。
 
 Mac：解压后保持 `.app`、`一键安装.command`、`install-mac.sh` 在同一目录，运行 `一键安装.command`。应用未签名，可能需要在系统设置中选择「仍要打开」；应用被拦时，不能依靠进入应用自修。
 Windows：运行安装 EXE。安装包未签名，可能出现系统提示，请核对下载来源后继续。

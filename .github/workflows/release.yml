@@ -45,6 +45,12 @@ jobs:
       - name: Bundle Mac installer scripts
         if: matrix.platform == 'mac'
         run: npm run package:mac -- ${{ matrix.arch }}
+      - name: Rename DMG to release naming
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          mv release/本地运行前端项目-*.dmg "release/local-run-frontend-v$(node -p "require('./package.json').version")-mac-${{ matrix.arch }}.dmg"
+          rm -f release/*.dmg.blockmap
       - name: Install and launch shipped application
         run: node test/smoke-native.js
       - uses: actions/upload-artifact@v4
@@ -52,6 +58,7 @@ jobs:
           name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
             release/local-run-frontend-v*.zip
+            release/local-run-frontend-v*.dmg
             release/local-run-frontend-v*.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
@@ -74,9 +81,10 @@ jobs:
       - name: Verify complete set and create checksums
         run: |
           test "$(find artifacts -name '*.zip' | wc -l)" -eq 2
+          test "$(find artifacts -name '*.dmg' | wc -l)" -eq 2
           test "$(find artifacts -name '*.exe' | wc -l)" -eq 1
           cd artifacts
-          sha256sum *.zip *.exe > SHA256SUMS.txt
+          sha256sum *.zip *.dmg *.exe > SHA256SUMS.txt
       - name: Create draft with verified assets
         env:
           GH_TOKEN: ${{ github.token }}

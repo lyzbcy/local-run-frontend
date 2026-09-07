@@ -173,7 +173,7 @@ body{font-family:"ZCOOL KuaiLe",-apple-system,BlinkMacSystemFont,"PingFang SC","
         <div class="step-body">
           <h3>下载安装</h3>
           <p><strong>v0.3.0 升级请手动下载本页安装包。</strong>旧版内置更新器有替换失败风险，本次修复从 v0.4.0 起生效。</p>
-          <p>Mac 需要 macOS 12+：按芯片下载 ZIP，解压后运行「一键安装.command」，与 .app、install-mac.sh 保持同目录。应用未签名，可能需在系统设置中选择「仍要打开」。Windows 需要 Windows 10+ x64：运行安装 EXE；未签名安装包可能显示系统提示，请核对来源后继续。</p>
+          <p><strong>Mac（推荐 DMG）</strong>：按芯片下载 DMG（Apple 芯片选 arm64，Intel 选 x64），双击打开，把左侧应用图标拖到右侧 Applications 文件夹即完成安装。首次打开若被拦：系统设置 → 隐私与安全性 → 「仍要打开」，或直接用应用内的「一键去除隔离」引导。也可下载 ZIP 解压后运行「一键安装.command」。需要 macOS 12+。<br><strong>Windows</strong>：Windows 10+ x64，运行安装 EXE；未签名安装包可能显示系统提示，请核对来源后继续。</p>
         </div>
       </div>
       <div class="step">
@@ -257,11 +257,11 @@ body{font-family:"ZCOOL KuaiLe",-apple-system,BlinkMacSystemFont,"PingFang SC","
 
 <div class="footer">
   <div>由 <a href="https://lyzbcy.github.io/" target="_blank" rel="noopener">捞鱼</a> 制作 · MIT 协议开源 · <a href="https://github.com/lyzbcy/local-run-frontend" target="_blank" rel="noopener">GitHub</a></div>
-  <div style="margin-top:6px;opacity:.7" id="pageVersion">页面版本 v0.4.0</div>
+  <div style="margin-top:6px;opacity:.7" id="pageVersion">页面版本 v0.4.1</div>
 </div>
 
 <script>
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 const REPO = 'lyzbcy/local-run-frontend';
 document.getElementById('pageVersion').textContent = '页面版本 v' + VERSION;
 function forceRefresh() {
